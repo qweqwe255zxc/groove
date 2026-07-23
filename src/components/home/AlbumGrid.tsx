@@ -27,7 +27,9 @@ export default function AlbumGrid() {
   if (albums.length === 0) {
     return (
       <p className="py-16 text-sm text-muted">
-        No albums found for &ldquo;{query}&rdquo;.
+        {isSearching
+          ? <>No albums found for &ldquo;{query}&rdquo;.</>
+          : "No featured albums available right now."}
       </p>
     );
   }
