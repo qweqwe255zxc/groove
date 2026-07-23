@@ -109,24 +109,32 @@ export default function OrbScene({
       const bin1 = (bin0 + 1) % SPECTRUM_BINS;
       const frac = binPos - Math.floor(binPos);
       const freq = spectrum[bin0] + (spectrum[bin1] - spectrum[bin0]) * frac;
+      // Raising to a power (rather than a linear blend) is what actually
+      // produces "one side barely moves, the opposite side goes off" — a
+      // quiet bin (freq ~0.1) gets crushed toward ~0, a loud one (freq ~1.5)
+      // gets pushed well past 1, so the gap between a quiet and a loud
+      // region widens far more than the raw spectrum values would alone.
+      const regional = Math.pow(freq / 1.4, 1.8);
 
       const n = noise3D(nx * 1.1 + t * 0.15, ny * 1.1 + t * 0.15, nz * 1.1 + t * 0.15);
-      // A shared bass floor keeps the whole cloud breathing together (still
-      // reads as one intuitive, beat-synced object); each point's own
-      // frequency-bin energy stacks on top of that, so different regions
-      // spike by different amounts depending on what's actually playing —
-      // the "unpredictable" part, without ever losing the shared pulse.
-      const strength = 0.1 + bass * 0.3 + freq * 0.7;
+      // FLOOR keeps a "barely moves" region from going perfectly static
+      // (reads as dead/frozen otherwise); the small shared bass term is what
+      // keeps every region on roughly the same underlying wave/beat even
+      // while `regional` is what actually drives the huge point-to-point
+      // spread in amplitude.
+      const FLOOR = 0.05;
+      const strength = FLOOR + bass * 0.15 + regional * 1.9;
       const disp = n * strength;
 
       posArr[ix] = basePositions[ix] + nx * disp;
       posArr[iy] = basePositions[iy] + ny * disp;
       posArr[iz] = basePositions[iz] + nz * disp;
 
-      // Same per-point frequency drives the color too, so a region that
-      // bulges out further also reads visibly "hotter" — one coherent cause
-      // for both, rather than shape and color reacting to different inputs.
-      const factor = THREE.MathUtils.clamp((n + 1) / 2 + freq * 0.5, 0, 1);
+      // Color follows the same regional signal, with the same exaggerated
+      // curve — a region that's barely moving stays close to the bass color,
+      // one that's going wild swings hard toward the treble color, so shape
+      // and color read as the same cause rather than two separate effects.
+      const factor = THREE.MathUtils.clamp(regional * 0.85 + (n + 1) * 0.08, 0, 1);
       colorArr[ix] = bassR + (trebleR - bassR) * factor;
       colorArr[iy] = bassG + (trebleG - bassG) * factor;
       colorArr[iz] = bassB + (trebleB - bassB) * factor;
