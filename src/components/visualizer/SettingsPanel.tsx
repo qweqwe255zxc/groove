@@ -22,8 +22,22 @@ export default function SettingsPanel() {
     function handlePointerDown(e: PointerEvent) {
       if (!containerRef.current?.contains(e.target as Node)) setOpen(false);
     }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(false);
+      }
+    }
     document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
+    // Capture phase: this dropdown should close on its own Escape press
+    // without also closing the fullscreen visualizer behind it in the same
+    // keystroke — stopping propagation here keeps that listener from firing.
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
   }, [open]);
 
   return (

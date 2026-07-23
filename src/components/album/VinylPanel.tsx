@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Image from "next/image";
 import gsap from "gsap";
 import { useAppStore } from "@/store/useAppStore";
@@ -53,6 +53,7 @@ function squareRadiusPercent(el: HTMLElement): number {
 
 export default function VinylPanel() {
   const selectedAlbum = useAppStore((s) => s.selectedAlbum);
+  const isVisualizerOpen = useAppStore((s) => s.isVisualizerOpen);
   const tracks = useAppStore((s) => s.tracks);
   const setTracks = useAppStore((s) => s.setTracks);
   const selectAlbum = useAppStore((s) => s.selectAlbum);
@@ -221,7 +222,7 @@ export default function VinylPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAlbum?.collectionId]);
 
-  function handleClose() {
+  const handleClose = useCallback(() => {
     const panel = panelRef.current;
     const cover = coverRef.current;
     const vinylDecor = vinylDecorRef.current;
@@ -333,7 +334,22 @@ export default function VinylPanel() {
       // produced it has since been cleared) — just shrink and fade in place.
       tl.to(cover, { opacity: 0, scale: 0.85, duration: 0.35, ease: "power2.in" }, 0);
     }
-  }
+  }, [selectedAlbum, selectAlbum]);
+
+  // Skipped while the visualizer is open on top of this panel — that overlay
+  // has its own Escape handler, and closing both at once from a single
+  // keypress would be a jarring double-exit instead of one layer at a time.
+  useEffect(() => {
+    if (!selectedAlbum || isVisualizerOpen) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        handleClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedAlbum, isVisualizerOpen, handleClose]);
 
   if (!selectedAlbum) return null;
 

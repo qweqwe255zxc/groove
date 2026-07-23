@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { EffectComposer, Bloom, Vignette } from "@react-three/postprocessing";
 import * as THREE from "three";
@@ -122,7 +122,7 @@ export default function VisualizerStage() {
   // click — every other overlay in the app (menu, vinyl panel) animates its
   // close. Mirrors VinylPanel's handleClose: animate first, only flip the
   // store flag (which actually unmounts this) once the fade finishes.
-  function handleClose() {
+  const handleClose = useCallback(() => {
     const el = stageRef.current;
     if (!el) {
       closeVisualizer();
@@ -135,7 +135,26 @@ export default function VisualizerStage() {
       ease: "power2.in",
       onComplete: closeVisualizer,
     });
-  }
+  }, [closeVisualizer]);
+
+  // Space toggles playback, Escape closes the overlay. Both call
+  // preventDefault(): without it, Space would ALSO re-click whichever button
+  // currently has focus — almost always the Play/Pause button itself, right
+  // after being clicked — double-toggling playback instead of once.
+  useEffect(() => {
+    if (!isVisualizerOpen) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === " " || e.code === "Space") {
+        e.preventDefault();
+        togglePlaying();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        handleClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isVisualizerOpen, togglePlaying, handleClose]);
 
   return (
     <>

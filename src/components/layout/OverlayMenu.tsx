@@ -43,6 +43,18 @@ export default function OverlayMenu() {
   const footerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!isMenuOpen) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMenuOpen(false);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isMenuOpen, setMenuOpen]);
+
+  useEffect(() => {
     const panel = panelRef.current;
     if (!panel) return;
 
