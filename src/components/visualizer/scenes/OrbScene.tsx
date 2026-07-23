@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useRef } from "react";
-import { useFrame } from "@react-three/fiber";
+import { useEffect, useMemo, useRef } from "react";
+import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { createNoise3D } from "simplex-noise";
 import type { AudioApi } from "@/hooks/useAudioAnalyser";
@@ -14,6 +14,9 @@ const BASE_RADIUS = 1.6;
 // without looking like per-point noise. Bins blend into their neighbor (see
 // binPositions below) so there's no hard seam between adjacent slices.
 const SPECTRUM_BINS = 10;
+// Both the drag handler and the momentum coast clamp tilt to this, stopping
+// just short of viewing the orb from directly overhead/underneath.
+const TILT_LIMIT = Math.PI / 2 - 0.15;
 
 function hexToRgb(hex: string): [number, number, number] {
   const c = new THREE.Color(hex);
@@ -30,6 +33,75 @@ export default function OrbScene({
   const groupRef = useRef<THREE.Group>(null);
   const pointsRef = useRef<THREE.Points>(null);
   const noise3D = useMemo(() => createNoise3D(), []);
+  const gl = useThree((s) => s.gl);
+
+  // Drag-to-spin: press and drag anywhere on the canvas to rotate the orb by
+  // hand. `velocity` is the angular speed (rad/sec) the drag was moving at
+  // the moment it's released — carried over as momentum so the orb keeps
+  // coasting and decays back down to the idle auto-rotation, rather than
+  // cutting straight from "under your cursor" to "auto-rotate" with no
+  // handoff.
+  const isDragging = useRef(false);
+  const lastPointer = useRef({ x: 0, y: 0, time: 0 });
+  const velocity = useRef({ rotX: 0, rotY: 0 });
+  const momentum = useRef({ rotX: 0, rotY: 0 });
+
+  useEffect(() => {
+    const el = gl.domElement;
+    const ROTATE_SPEED = 0.008; // radians of orbit rotation per pixel of drag
+
+    function handlePointerDown(e: PointerEvent) {
+      isDragging.current = true;
+      momentum.current = { rotX: 0, rotY: 0 };
+      lastPointer.current = { x: e.clientX, y: e.clientY, time: performance.now() };
+      el.setPointerCapture(e.pointerId);
+    }
+
+    function handlePointerMove(e: PointerEvent) {
+      const group = groupRef.current;
+      if (!isDragging.current || !group) return;
+
+      const now = performance.now();
+      const dt = Math.max((now - lastPointer.current.time) / 1000, 1 / 120);
+      const dx = e.clientX - lastPointer.current.x;
+      const dy = e.clientY - lastPointer.current.y;
+      const rotY = dx * ROTATE_SPEED;
+      const rotX = dy * ROTATE_SPEED;
+
+      group.rotation.y += rotY;
+      group.rotation.x = THREE.MathUtils.clamp(group.rotation.x + rotX, -TILT_LIMIT, TILT_LIMIT);
+
+      velocity.current = { rotX: rotX / dt, rotY: rotY / dt };
+      lastPointer.current = { x: e.clientX, y: e.clientY, time: now };
+    }
+
+    function handlePointerUp(e: PointerEvent) {
+      if (!isDragging.current) return;
+      isDragging.current = false;
+      momentum.current = { ...velocity.current };
+      if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    }
+
+    el.addEventListener("pointerdown", handlePointerDown);
+    el.addEventListener("pointermove", handlePointerMove);
+    el.addEventListener("pointerup", handlePointerUp);
+    el.addEventListener("pointercancel", handlePointerUp);
+    // touch-action: none stops the browser from also trying to scroll/
+    // pinch-zoom the page from the same drag — background scroll is already
+    // locked while the visualizer is open, but this keeps the drag itself
+    // from fighting any native touch gesture handling.
+    const prevTouchAction = el.style.touchAction;
+    const prevCursor = el.style.cursor;
+    Object.assign(el.style, { touchAction: "none", cursor: "grab" });
+
+    return () => {
+      el.removeEventListener("pointerdown", handlePointerDown);
+      el.removeEventListener("pointermove", handlePointerMove);
+      el.removeEventListener("pointerup", handlePointerUp);
+      el.removeEventListener("pointercancel", handlePointerUp);
+      Object.assign(el.style, { touchAction: prevTouchAction, cursor: prevCursor });
+    };
+  }, [gl]);
 
   // A pristine copy of the sphere's resting positions/normals — every frame
   // displaces *from* this, never from the previous frame's already-displaced
@@ -143,9 +215,28 @@ export default function OrbScene({
     posAttr.needsUpdate = true;
     colorAttr.needsUpdate = true;
 
-    if (groupRef.current) {
-      groupRef.current.rotation.y += delta * (0.08 + overall * 0.25);
-      groupRef.current.rotation.x += delta * 0.02;
+    const group = groupRef.current;
+    if (!group) return;
+
+    if (isDragging.current) {
+      // Rotation is already applied directly inside the pointermove handler,
+      // for zero-lag 1:1 tracking under the cursor/finger.
+    } else if (Math.abs(momentum.current.rotX) > 0.001 || Math.abs(momentum.current.rotY) > 0.001) {
+      group.rotation.y += momentum.current.rotY * delta;
+      group.rotation.x = THREE.MathUtils.clamp(
+        group.rotation.x + momentum.current.rotX * delta,
+        -TILT_LIMIT,
+        TILT_LIMIT
+      );
+      // ~8% of the coasting speed left after each second, so a hard flick
+      // spins for a beat and eases out instead of stopping dead or coasting
+      // forever.
+      const decay = Math.pow(0.08, delta);
+      momentum.current.rotX *= decay;
+      momentum.current.rotY *= decay;
+    } else {
+      group.rotation.y += delta * (0.08 + overall * 0.25);
+      group.rotation.x += delta * 0.02;
     }
   });
 
