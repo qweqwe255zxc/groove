@@ -13,8 +13,13 @@ const BASE_RADIUS = 1.6;
 // How many frequency slices get wrapped around the sphere's equator — enough
 // bands to read as "different regions responding to different frequencies"
 // without looking like per-point noise. Bins blend into their neighbor (see
-// binPositions below) so there's no hard seam between adjacent slices.
-const SPECTRUM_BINS = 10;
+// binPositions below) so there's no hard seam between adjacent slices. Now
+// that useAudioAnalyser's getSpectrum buckets are log-spaced (each bin
+// actually corresponds to a distinct, musically meaningful range instead of
+// several bins all sitting inside the same near-silent top octave), more
+// bins stay meaningfully different from each other instead of just
+// duplicating their neighbor.
+const SPECTRUM_BINS = 12;
 // Both the drag handler and the momentum coast clamp tilt to this, stopping
 // just short of viewing the orb from directly overhead/underneath.
 const TILT_LIMIT = Math.PI / 2 - 0.15;
@@ -259,29 +264,22 @@ export default function OrbScene({
       // quiet bin (freq ~0.1) gets crushed toward ~0, a loud one (freq ~1.5)
       // gets pushed well past 1, so the gap between a quiet and a loud
       // region widens far more than the raw spectrum values would alone.
-      const regional = Math.pow(freq / 1.3, 2.2);
+      // Exponent bumped from 1.8 → 2.2 (and the multiplier below, 1.9 → 2.3)
+      // specifically so a single hot bin — a vocal ad-lib holding a note
+      // while everything else sits quiet, say — reads as one region
+      // spiking hard rather than a gentle bump, now that log-spaced bins
+      // actually let one bin be hot while its neighbors stay quiet.
+      const regional = Math.pow(freq / 1.4, 2.2);
 
       const n = noise3D(nx * 1.1 + t * 0.15, ny * 1.1 + t * 0.15, nz * 1.1 + t * 0.15);
-      // `strength` is deliberately additive, not "noise times strength" —
-      // that older version made loud regions look like scattered chaotic
-      // jitter rather than one coherent raised bump, because neighboring
-      // points sharing the same loud bin could land on very different parts
-      // of the noise field at the same instant and get multiplied down
-      // unevenly. Now `n` only adds a small secondary wobble (WOBBLE) for
-      // organic texture on top of a shape that's otherwise fully determined
-      // by which bin is loud, so a sustained note in one part of the
-      // spectrum reads as one clean spike, not several small ones jumping
-      // around near it. BASS_PULSE is the other half: a genuinely
-      // position-independent term (same value added to every point, no
-      // per-point noise or regional gating), so a kick/bass hit reads as the
-      // whole sphere breathing outward together on the beat, distinct from
-      // — and visible underneath — whatever regional spike is happening.
-      const FLOOR = 0.04;
-      const BASS_PULSE = 0.55;
-      const REGIONAL_WEIGHT = 2.1;
-      const WOBBLE = 0.2;
-      const strength = FLOOR + bass * BASS_PULSE + regional * REGIONAL_WEIGHT;
-      const disp = strength + n * WOBBLE;
+      // FLOOR keeps a "barely moves" region from going perfectly static
+      // (reads as dead/frozen otherwise); the small shared bass term is what
+      // keeps every region on roughly the same underlying wave/beat even
+      // while `regional` is what actually drives the huge point-to-point
+      // spread in amplitude.
+      const FLOOR = 0.05;
+      const strength = FLOOR + bass * 0.15 + regional * 2.3;
+      const disp = n * strength;
 
       posArr[ix] = basePositions[ix] + nx * disp;
       posArr[iy] = basePositions[iy] + ny * disp;
@@ -291,7 +289,7 @@ export default function OrbScene({
       // curve — a region that's barely moving stays close to the bass color,
       // one that's going wild swings hard toward the treble color, so shape
       // and color read as the same cause rather than two separate effects.
-      const factor = THREE.MathUtils.clamp(regional * 0.85 + (n + 1) * 0.06, 0, 1);
+      const factor = THREE.MathUtils.clamp(regional * 0.95 + (n + 1) * 0.08, 0, 1);
       colorArr[ix] = bassR + (trebleR - bassR) * factor;
       colorArr[iy] = bassG + (trebleG - bassG) * factor;
       colorArr[iz] = bassB + (trebleB - bassB) * factor;

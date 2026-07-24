@@ -109,6 +109,18 @@ export function useAudioAnalyser(
   // one Float32Array (sized to the last requested `bins`) to stay allocation-free
   // in a useFrame loop. The top ~15% of bins is dropped — it's near-silent for
   // most music and would otherwise flatten the visible bars.
+  //
+  // Bucket edges are log-spaced, not linear. FFT bins are linearly spaced in
+  // Hz (fftSize 256 → ~172Hz/bin), so equal-width linear buckets each cover a
+  // fixed Hz range — and almost the entire vocal/melodic range (say 200Hz-3kHz,
+  // where a lead vocal's pitch actually moves) used to land inside just 1-2 of
+  // the 10 buckets, while several buckets were spent on the near-empty top
+  // octaves. That's what made every region of OrbScene's cloud track roughly
+  // the same "loud now vs not" signal instead of different regions lighting up
+  // for a bassline vs. a vocal ad-lib vs. a hi-hat. Log spacing gives the
+  // low/mid range — where music actually carries distinct, moving pitch
+  // content — most of the buckets, matching how pitch is perceived, so
+  // different frequency content actually drives different regions.
   const getSpectrum = useCallback((bins: number): Float32Array => {
     if (!spectrumRef.current || spectrumRef.current.length !== bins) {
       spectrumRef.current = new Float32Array(bins);
@@ -122,11 +134,18 @@ export function useAudioAnalyser(
     analyser.getByteFrequencyData(data);
     const boost = sensitivityRef.current;
     const usableLength = Math.floor(data.length * 0.85);
-    const bucketSize = usableLength / bins;
+    // Bin 0 (DC/near-0Hz) can't seed a log scale — start the curve at bin 1
+    // and prepend it back into the first bucket.
+    const minIndex = 1;
+    const ratio = usableLength / minIndex;
 
     for (let i = 0; i < bins; i++) {
-      const start = Math.floor(i * bucketSize);
-      const end = Math.max(start + 1, Math.floor((i + 1) * bucketSize));
+      const start =
+        i === 0 ? 0 : Math.floor(minIndex * Math.pow(ratio, i / bins));
+      const end = Math.max(
+        start + 1,
+        Math.floor(minIndex * Math.pow(ratio, (i + 1) / bins))
+      );
       let sum = 0;
       for (let j = start; j < end; j++) sum += data[j];
       out[i] = Math.min((sum / (end - start) / 255) * boost, 1.6);
