@@ -292,29 +292,45 @@ export default function OrbScene({
   return (
     <group ref={groupRef}>
       {
-        // A second, larger, low-opacity, *additively* blended copy of the
-        // same point cloud underneath the crisp solid layer — a real soft
-        // halo around each point, not just relying on postprocessing. Light
-        // theme needs this outright: NormalBlending there is flat alpha
-        // compositing with no glow of its own, and Bloom's luminance
-        // threshold has almost nothing to grab onto on a field of 1-2px
-        // points (unlike TerrainScene's large solid bars used to be — see
-        // getParticleColors in palettes.ts). Dark theme *could* get by on
-        // Bloom alone (additive blending on a near-black bg already reads as
-        // glowing, and postprocessing picks up the rest), but a tight halo
-        // this close to the source reads as brighter and more immediate than
-        // Bloom's wider blur radius alone — bigger and hotter here since
-        // it's stacking with real Bloom on top of it, rather than being the
-        // only glow mechanism the way it is in light theme.
+        // Light theme only: a much wider, fainter outer corona that fakes
+        // the soft gradient falloff Bloom's mipmapBlur gives dark theme for
+        // free. Dark theme doesn't need this on top of the halo below —
+        // that combination blew the sphere out into a shapeless white blob,
+        // losing the silhouette entirely, when Bloom (already boosted for
+        // dark, see DARK_BLOOM_TUNING) was already doing this same "soft
+        // wide spread" job. Light theme has no such postprocessing (Bloom is
+        // skipped there entirely — VisualizerStage) and NormalBlending's
+        // flat alpha compositing has no glow of its own, so it needs this
+        // spread faked manually instead.
+        isLight && (
+          <points geometry={sharedGeometry}>
+            <pointsMaterial
+              map={dotMap}
+              size={0.32}
+              sizeAttenuation
+              vertexColors
+              transparent
+              opacity={0.22}
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+            />
+          </points>
+        )
+      }
+      {
+        // Tight halo right at each point's edge — present in both themes,
+        // brighter in light theme where (together with the corona above)
+        // it's the only glow mechanism, versus dark theme where it stacks on
+        // top of real Bloom rather than being the only one.
       }
       <points geometry={sharedGeometry}>
         <pointsMaterial
           map={dotMap}
-          size={isLight ? 0.05 : 0.09}
+          size={isLight ? 0.11 : 0.09}
           sizeAttenuation
           vertexColors
           transparent
-          opacity={isLight ? 0.16 : 0.35}
+          opacity={isLight ? 0.42 : 0.35}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
         />
