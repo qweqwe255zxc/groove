@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAppStore, type ColorScheme } from "@/store/useAppStore";
 import { PALETTES } from "./palettes";
 
-const SCHEMES: ColorScheme[] = ["clay", "mono", "sage", "neon"];
+const SCHEMES: ColorScheme[] = ["mono", "clay", "sage", "neon"];
 
 export default function SettingsPanel() {
   const [open, setOpen] = useState(false);

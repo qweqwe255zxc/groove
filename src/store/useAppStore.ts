@@ -58,7 +58,7 @@ export const useAppStore = create<AppState>((set) => ({
   visualizerMode: "orb",
 
   sensitivity: 1,
-  colorScheme: "clay",
+  colorScheme: "mono",
 
   isMenuOpen: false,
   introComplete: false,
