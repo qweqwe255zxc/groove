@@ -292,37 +292,33 @@ export default function OrbScene({
   return (
     <group ref={groupRef}>
       {
-        // Dark theme gets its glow for free: AdditiveBlending on a
-        // near-black background makes even a faint point read as glowing,
-        // and the postprocessing Bloom pass (VisualizerStage) picks up the
-        // rest. Light theme can't use additive (it'd just clip every point
-        // straight to white against the light bg — see palettes.ts), so it
-        // renders with NormalBlending instead — but that's flat alpha
-        // compositing, not glow, and Bloom's luminance threshold has almost
-        // nothing to grab onto on a field of 1-2px points (unlike
-        // TerrainScene's large solid bars, there's no meaningful pixel area
-        // to bloom). So light theme gets its own manual glow: a second,
-        // larger, low-opacity, *additively* blended copy of the same point
-        // cloud underneath the crisp solid layer — a real soft halo around
-        // each point instead of relying on postprocessing that can't see
-        // sparse points, and since it reads the same live color buffer, the
-        // glow already brightens toward `treble` exactly where the solid
-        // layer does.
-        isLight && (
-          <points geometry={sharedGeometry}>
-            <pointsMaterial
-              map={dotMap}
-              size={0.05}
-              sizeAttenuation
-              vertexColors
-              transparent
-              opacity={0.16}
-              blending={THREE.AdditiveBlending}
-              depthWrite={false}
-            />
-          </points>
-        )
+        // A second, larger, low-opacity, *additively* blended copy of the
+        // same point cloud underneath the crisp solid layer — a real soft
+        // halo around each point, not just relying on postprocessing. Light
+        // theme needs this outright: NormalBlending there is flat alpha
+        // compositing with no glow of its own, and Bloom's luminance
+        // threshold has almost nothing to grab onto on a field of 1-2px
+        // points (unlike TerrainScene's large solid bars used to be — see
+        // getParticleColors in palettes.ts). Dark theme *could* get by on
+        // Bloom alone (additive blending on a near-black bg already reads as
+        // glowing, and postprocessing picks up the rest), but a tight halo
+        // this close to the source reads as brighter and more immediate than
+        // Bloom's wider blur radius alone — bigger and hotter here since
+        // it's stacking with real Bloom on top of it, rather than being the
+        // only glow mechanism the way it is in light theme.
       }
+      <points geometry={sharedGeometry}>
+        <pointsMaterial
+          map={dotMap}
+          size={isLight ? 0.05 : 0.09}
+          sizeAttenuation
+          vertexColors
+          transparent
+          opacity={isLight ? 0.16 : 0.35}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </points>
       <points ref={pointsRef} geometry={sharedGeometry}>
         <pointsMaterial
           map={dotMap}

@@ -9,27 +9,46 @@ import type { SystemTheme } from "@/hooks/useSystemTheme";
 import { getDotTexture } from "./dotTexture";
 
 const BAR_COUNT = 56; // angular slices around the ring
-const POINTS_PER_BAR = 34; // vertical density of one column of dots
+const HEIGHT_LAYERS = 24; // vertical density of one column
+// Each column is a small square cross-section filled with points (matching
+// the old boxGeometry's 0.18x0.18 footprint), not a single line of dots —
+// CROSS_SIZE² points per height layer.
+const CROSS_SIZE = 3;
+const FOOTPRINT = 0.16;
+// Baked into each point's base position once (not per-frame) so the
+// cross-section reads as an organically filled rectangle instead of a rigid
+// lattice — same spirit as OrbScene's noise displacement, just static here.
+const GRID_JITTER = 0.03;
 const RADIUS = 2.6;
-// Small tangential wobble applied per point so a column reads as a soft
-// cluster of dots rather than a rigid rod — kept well under the angular gap
-// between neighboring bars (circumference / BAR_COUNT ≈ 0.29 at this
-// radius) so columns stay visually distinct instead of bleeding together.
-const JITTER = 0.045;
+// Small extra wobble applied per-frame on top of the baked grid jitter, kept
+// well under the angular gap between neighboring bars (circumference /
+// BAR_COUNT ≈ 0.29 at this radius) so columns stay visually distinct instead
+// of bleeding together.
+const JITTER = 0.02;
 
 function hexToRgb(hex: string): [number, number, number] {
   const c = new THREE.Color(hex);
   return [c.r, c.g, c.b];
 }
 
+// Deterministic stand-in for Math.random() — React Compiler's purity lint
+// forbids calling genuinely impure functions during render (even inside a
+// useMemo), and this only ever needs to look random, not actually be
+// unpredictable across renders.
+function pseudoRandom(seed: number): number {
+  const x = Math.sin(seed * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+}
+
 // Same point-cloud technique as OrbScene: a shared BufferGeometry rewritten
 // every frame from precomputed base layout, soft round sprites instead of
-// hard-edged squares, vertex colors, and (in light theme) a second additive
-// glow layer underneath — no meshes, no scene lights. Each of the BAR_COUNT
-// angular slices gets a column of POINTS_PER_BAR points; a point's Y is
-// `frac * thatColumn'sCurrentHeight` (frac = its fixed slot within the
-// column, 0 at the base, 1 at the tip), so raising a column's height reveals
-// points climbing up it — a particle "fill level" instead of an extruded box.
+// hard-edged squares, vertex colors, and a second additive glow layer
+// underneath — no meshes, no scene lights. Each of the BAR_COUNT angular
+// slices gets a rectangular column filled with points (HEIGHT_LAYERS tall,
+// CROSS_SIZE² across); a point's Y is `frac * thatColumn'sCurrentHeight`
+// (frac = its fixed slot within the column, 0 at the base, 1 at the tip), so
+// raising a column's height reveals points climbing up it — a particle
+// "fill level" instead of an extruded box.
 export default function TerrainScene({
   audio,
   particleColors,
@@ -50,7 +69,7 @@ export default function TerrainScene({
 
   const { barIndex, angle, frac, baseX, baseZ, positions, colors, count } =
     useMemo(() => {
-      const n = BAR_COUNT * POINTS_PER_BAR;
+      const n = BAR_COUNT * HEIGHT_LAYERS * CROSS_SIZE * CROSS_SIZE;
       const barIndexArr = new Float32Array(n);
       const angleArr = new Float32Array(n);
       const fracArr = new Float32Array(n);
@@ -62,22 +81,44 @@ export default function TerrainScene({
       let idx = 0;
       for (let b = 0; b < BAR_COUNT; b++) {
         const a = (b / BAR_COUNT) * Math.PI * 2;
-        const x = Math.cos(a) * RADIUS;
-        const z = Math.sin(a) * RADIUS;
-        for (let p = 0; p < POINTS_PER_BAR; p++) {
-          const f = p / (POINTS_PER_BAR - 1);
-          barIndexArr[idx] = b;
-          angleArr[idx] = a;
-          fracArr[idx] = f;
-          baseXArr[idx] = x;
-          baseZArr[idx] = z;
-          // Seeded at the resting (near-silent) height, not the origin —
-          // otherwise every point would flash bunched at (0,0,0) for the
-          // one frame before useFrame first runs.
-          positionsArr[idx * 3] = x;
-          positionsArr[idx * 3 + 1] = f * 0.15;
-          positionsArr[idx * 3 + 2] = z;
-          idx++;
+        const cx = Math.cos(a) * RADIUS;
+        const cz = Math.sin(a) * RADIUS;
+        // Decomposed along the ring's radial/tangential directions (rather
+        // than raw world X/Z) so the cross-section stays a consistent
+        // square regardless of which way the bar happens to be facing.
+        const radialX = Math.cos(a);
+        const radialZ = Math.sin(a);
+        const tangentX = -Math.sin(a);
+        const tangentZ = Math.cos(a);
+
+        for (let h = 0; h < HEIGHT_LAYERS; h++) {
+          const f = h / (HEIGHT_LAYERS - 1);
+          for (let cw = 0; cw < CROSS_SIZE; cw++) {
+            for (let cd = 0; cd < CROSS_SIZE; cd++) {
+              const cellSeed = ((b * HEIGHT_LAYERS + h) * CROSS_SIZE + cw) * CROSS_SIZE + cd;
+              const gridR =
+                (cw / (CROSS_SIZE - 1) - 0.5) * FOOTPRINT +
+                (pseudoRandom(cellSeed) - 0.5) * GRID_JITTER;
+              const gridT =
+                (cd / (CROSS_SIZE - 1) - 0.5) * FOOTPRINT +
+                (pseudoRandom(cellSeed + 0.5) - 0.5) * GRID_JITTER;
+              const x = cx + radialX * gridR + tangentX * gridT;
+              const z = cz + radialZ * gridR + tangentZ * gridT;
+
+              barIndexArr[idx] = b;
+              angleArr[idx] = a;
+              fracArr[idx] = f;
+              baseXArr[idx] = x;
+              baseZArr[idx] = z;
+              // Seeded at the resting (near-silent) height, not the origin —
+              // otherwise every point would flash bunched at (0,0,0) for the
+              // one frame before useFrame first runs.
+              positionsArr[idx * 3] = x;
+              positionsArr[idx * 3 + 1] = f * 0.15;
+              positionsArr[idx * 3 + 2] = z;
+              idx++;
+            }
+          }
         }
       }
 
@@ -93,9 +134,8 @@ export default function TerrainScene({
       };
     }, []);
 
-  // One real geometry shared by both the solid point layer and (in light
-  // theme) the additive glow layer beneath it — see the identical comment
-  // in OrbScene.
+  // One real geometry shared by both the solid point layer and the additive
+  // glow layer beneath it — see the identical comment in OrbScene.
   const sharedGeometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -171,20 +211,25 @@ export default function TerrainScene({
 
   return (
     <group ref={groupRef}>
-      {isLight && (
-        <points geometry={sharedGeometry}>
-          <pointsMaterial
-            map={dotMap}
-            size={0.09}
-            sizeAttenuation
-            vertexColors
-            transparent
-            opacity={0.16}
-            blending={THREE.AdditiveBlending}
-            depthWrite={false}
-          />
-        </points>
-      )}
+      {
+        // Second, larger, low-opacity additive copy underneath the crisp
+        // layer — see the identical comment on OrbScene's glow layer for why
+        // this exists in both themes and runs hotter/bigger in dark theme,
+        // where it stacks with real postprocessing Bloom rather than being
+        // the only glow mechanism.
+      }
+      <points geometry={sharedGeometry}>
+        <pointsMaterial
+          map={dotMap}
+          size={isLight ? 0.09 : 0.16}
+          sizeAttenuation
+          vertexColors
+          transparent
+          opacity={isLight ? 0.16 : 0.3}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </points>
       <points ref={pointsRef} geometry={sharedGeometry}>
         <pointsMaterial
           map={dotMap}

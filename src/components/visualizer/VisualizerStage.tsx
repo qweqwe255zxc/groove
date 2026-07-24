@@ -28,8 +28,11 @@ const BASE_FOG_FAR = 13;
 
 // Only ever used in dark theme — see the comment on `theme`/Bloom below for
 // why light theme skips the Bloom pass entirely instead of needing its own
-// tuning here.
-const DARK_BLOOM_TUNING = { luminanceThreshold: 0.2, luminanceSmoothing: 0.9, intensity: 1.1 };
+// tuning here. Threshold lowered and intensity/smoothing raised from the
+// original (0.2/0.9/1.1) — both scenes' points were reading as barely
+// glowing beyond their own edges even with additive blending, so this pass
+// needed to grab more of them and spread what it grabs further.
+const DARK_BLOOM_TUNING = { luminanceThreshold: 0.1, luminanceSmoothing: 0.95, intensity: 1.9 };
 
 // A fixed vertical `fov` plus a fixed camera distance only fits the scene at
 // the aspect ratio it was tuned for (desktop, ~16:9). Three.js/R3F derive the
