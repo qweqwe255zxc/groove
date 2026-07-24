@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getAlbumWithTracks } from "@/lib/itunes";
 import DeepLinkVisualizer from "@/components/album/DeepLinkVisualizer";
+import HomeContent from "@/components/home/HomeContent";
 
 type Params = { collectionId: string; trackId: string };
 
@@ -63,5 +64,20 @@ export default async function VisualizerDeepLink({
   if (!resolved) notFound();
 
   const { album, tracks, track } = resolved;
-  return <DeepLinkVisualizer album={album} tracks={tracks} track={track} />;
+  return (
+    <>
+      {
+        // The vinyl panel and visualizer overlay both live in layout.tsx and
+        // are purely store-driven (see CLAUDE.md's gotcha on why), so this
+        // route needs the same underlying page content "/" has — otherwise
+        // closing the overlays this URL opens on arrival reveals nothing at
+        // all (this route's own page component would otherwise be just
+        // DeepLinkVisualizer, which renders null) instead of falling back to
+        // the normal homepage underneath, like closing out of an
+        // album/visualizer opened from "/" does.
+      }
+      <HomeContent />
+      <DeepLinkVisualizer album={album} tracks={tracks} track={track} />
+    </>
+  );
 }
