@@ -51,6 +51,19 @@ function squareRadiusPercent(el: HTMLElement): number {
   return (8 / el.offsetWidth) * 100;
 }
 
+// Reads the vinyl's *actual* current border-radius, whatever point the open
+// flight's own percentage-based tween happens to be at — used when closing
+// interrupts that flight mid-way, so the close animation continues smoothly
+// from wherever the shape actually is instead of snapping to an assumed
+// "fully round" starting point. Once the open flight has finished and its
+// inline style was cleared, this falls through to Tailwind's `rounded-full`
+// class instead — a huge px value, not a percentage, which is why the
+// fallback (rather than parsing it) is just the same 50% used before.
+function currentBorderRadiusPercent(el: HTMLElement): number {
+  const raw = getComputedStyle(el).borderTopLeftRadius;
+  return raw.endsWith("%") ? parseFloat(raw) : 50;
+}
+
 export default function VinylPanel() {
   const selectedAlbum = useAppStore((s) => s.selectedAlbum);
   const isVisualizerOpen = useAppStore((s) => s.isVisualizerOpen);
@@ -67,6 +80,13 @@ export default function VinylPanel() {
   const vinylDecorRef = useRef<HTMLDivElement>(null);
   const detailsRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  // The open flight's own timeline — closing has to kill this if it's still
+  // running (Escape/backdrop/Close pressed mid-flight), or its still-queued
+  // tweens and the `tl.call()` that hands off to the idle CSS spin keep
+  // firing on their original schedule and stomp on the close animation
+  // (snapping transform/border-radius, or re-adding the spin class) while
+  // it's running concurrently.
+  const openTimelineRef = useRef<gsap.core.Timeline | null>(null);
   // Tracks which album's fetch has actually finished (success, failure, or
   // legitimately zero tracks), so "loading" can resolve even when the result
   // is empty. No reset needed when a new album is picked — resolvedId just
@@ -122,7 +142,12 @@ export default function VinylPanel() {
     // top of what still looks like a square cover.
     if (vinylDecor) gsap.set(vinylDecor, { opacity: 0 });
 
-    const tl = gsap.timeline();
+    const tl = gsap.timeline({
+      onComplete: () => {
+        openTimelineRef.current = null;
+      },
+    });
+    openTimelineRef.current = tl;
 
     const FLIGHT_EASE = "power3.inOut";
     const FLIGHT_DURATION = 0.75;
@@ -239,6 +264,14 @@ export default function VinylPanel() {
     // a second close timeline on top of one already in flight.
     if (panel) panel.style.pointerEvents = "none";
 
+    // If Escape/backdrop/Close fires before the open flight has landed, its
+    // timeline is still actively ticking — kill it now so its remaining
+    // tweens and its `tl.call()` handoff to the idle CSS spin can't fire
+    // later and stomp on the close animation this function is about to
+    // start on the very same properties.
+    openTimelineRef.current?.kill();
+    openTimelineRef.current = null;
+
     // The grid's AlbumCard for this album is still in the document the
     // whole time — it never unmounted, just went opacity-0 — so its current
     // box is right there to fit back onto. Both it and this panel's cover
@@ -256,10 +289,14 @@ export default function VinylPanel() {
     // Freeze the CSS spin at its current angle (read straight off the live
     // computed transform, since nothing tracks how far into its 2.6s loop
     // it currently is) before handing rotation over to GSAP — removing the
-    // class without doing this first would snap it back to 0deg first.
+    // class without doing this first would snap it back to 0deg first. Same
+    // idea for border-radius: read whatever the (now-killed) open flight's
+    // own tween actually reached, rather than assuming it had already
+    // finished growing into a full circle.
     const currentAngle = currentRotationDeg(cover);
+    const currentRadius = currentBorderRadiusPercent(cover);
     cover.classList.remove("animate-spin-vinyl");
-    gsap.set(cover, { rotation: currentAngle, borderRadius: "50%" });
+    gsap.set(cover, { rotation: currentAngle, borderRadius: `${currentRadius}%` });
 
     const tl = gsap.timeline({ onComplete: () => selectAlbum(null) });
 
@@ -270,7 +307,7 @@ export default function VinylPanel() {
     // snapping flat almost immediately.
     tl.fromTo(
       cover,
-      { borderRadius: "50%" },
+      { borderRadius: `${currentRadius}%` },
       { borderRadius: `${squareRadiusPercent(cover)}%`, duration: CLOSE_DURATION, ease: "power3.inOut" },
       0
     );
