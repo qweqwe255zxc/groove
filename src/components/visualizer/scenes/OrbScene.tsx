@@ -259,22 +259,29 @@ export default function OrbScene({
       // quiet bin (freq ~0.1) gets crushed toward ~0, a loud one (freq ~1.5)
       // gets pushed well past 1, so the gap between a quiet and a loud
       // region widens far more than the raw spectrum values would alone.
-      const regional = Math.pow(freq / 1.4, 1.8);
+      const regional = Math.pow(freq / 1.3, 2.2);
 
       const n = noise3D(nx * 1.1 + t * 0.15, ny * 1.1 + t * 0.15, nz * 1.1 + t * 0.15);
-      // FLOOR keeps a "barely moves" region from going perfectly static
-      // (reads as dead/frozen otherwise); the small shared bass term is what
-      // keeps every region on roughly the same underlying wave/beat even
-      // while `regional` is what actually drives the huge point-to-point
-      // spread in amplitude. `regional` and `bass` are added directly into
-      // `disp`, not multiplied by `n` — a loud region needs to consistently
-      // bulge outward for its own frequency, not have a wandering noise
-      // value occasionally flip it back inward at the same amplitude a
-      // silent region gets. `n` only contributes a small additive wobble on
-      // top, for organic texture, instead of deciding a point's direction.
-      const FLOOR = 0.05;
-      const WOBBLE = 0.12;
-      const disp = FLOOR + bass * 0.15 + regional * 1.9 + n * WOBBLE;
+      // `strength` is deliberately additive, not "noise times strength" —
+      // that older version made loud regions look like scattered chaotic
+      // jitter rather than one coherent raised bump, because neighboring
+      // points sharing the same loud bin could land on very different parts
+      // of the noise field at the same instant and get multiplied down
+      // unevenly. Now `n` only adds a small secondary wobble (WOBBLE) for
+      // organic texture on top of a shape that's otherwise fully determined
+      // by which bin is loud, so a sustained note in one part of the
+      // spectrum reads as one clean spike, not several small ones jumping
+      // around near it. BASS_PULSE is the other half: a genuinely
+      // position-independent term (same value added to every point, no
+      // per-point noise or regional gating), so a kick/bass hit reads as the
+      // whole sphere breathing outward together on the beat, distinct from
+      // — and visible underneath — whatever regional spike is happening.
+      const FLOOR = 0.04;
+      const BASS_PULSE = 0.55;
+      const REGIONAL_WEIGHT = 2.1;
+      const WOBBLE = 0.2;
+      const strength = FLOOR + bass * BASS_PULSE + regional * REGIONAL_WEIGHT;
+      const disp = strength + n * WOBBLE;
 
       posArr[ix] = basePositions[ix] + nx * disp;
       posArr[iy] = basePositions[iy] + ny * disp;
@@ -284,7 +291,7 @@ export default function OrbScene({
       // curve — a region that's barely moving stays close to the bass color,
       // one that's going wild swings hard toward the treble color, so shape
       // and color read as the same cause rather than two separate effects.
-      const factor = THREE.MathUtils.clamp(regional * 0.85 + (n + 1) * 0.08, 0, 1);
+      const factor = THREE.MathUtils.clamp(regional * 0.85 + (n + 1) * 0.06, 0, 1);
       colorArr[ix] = bassR + (trebleR - bassR) * factor;
       colorArr[iy] = bassG + (trebleG - bassG) * factor;
       colorArr[iz] = bassB + (trebleB - bassB) * factor;
