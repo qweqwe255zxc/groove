@@ -3,6 +3,7 @@
 import { useAppStore } from "@/store/useAppStore";
 import GrooveMark from "./GrooveMark";
 import HashLink from "./HashLink";
+import ThemeToggle from "./ThemeToggle";
 
 export default function SiteHeader() {
   const isMenuOpen = useAppStore((s) => s.isMenuOpen);
@@ -32,26 +33,29 @@ export default function SiteHeader() {
         groove
       </HashLink>
 
-      <button
-        type="button"
-        onClick={() => setMenuOpen(!isMenuOpen)}
-        className="-m-2 flex items-center gap-3 p-2 text-xs uppercase tracking-[0.2em] cursor-pointer"
-        aria-expanded={isMenuOpen}
-      >
-        <span>{isMenuOpen ? "Close" : "Menu"}</span>
-        <span className="relative block h-3 w-6">
-          <span
-            className={`absolute left-0 top-0 h-px w-6 bg-white transition-transform duration-300 ${
-              isMenuOpen ? "translate-y-[6px] rotate-45" : ""
-            }`}
-          />
-          <span
-            className={`absolute left-0 bottom-0 h-px w-6 bg-white transition-transform duration-300 ${
-              isMenuOpen ? "-translate-y-[6px] -rotate-45" : ""
-            }`}
-          />
-        </span>
-      </button>
+      <div className="flex items-center gap-5">
+        <ThemeToggle variant="header" />
+        <button
+          type="button"
+          onClick={() => setMenuOpen(!isMenuOpen)}
+          className="-m-2 flex items-center gap-3 p-2 text-xs uppercase tracking-[0.2em] cursor-pointer"
+          aria-expanded={isMenuOpen}
+        >
+          <span>{isMenuOpen ? "Close" : "Menu"}</span>
+          <span className="relative block h-3 w-6">
+            <span
+              className={`absolute left-0 top-0 h-px w-6 bg-white transition-transform duration-300 ${
+                isMenuOpen ? "translate-y-[6px] rotate-45" : ""
+              }`}
+            />
+            <span
+              className={`absolute left-0 bottom-0 h-px w-6 bg-white transition-transform duration-300 ${
+                isMenuOpen ? "-translate-y-[6px] -rotate-45" : ""
+              }`}
+            />
+          </span>
+        </button>
+      </div>
     </header>
   );
 }
