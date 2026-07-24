@@ -10,10 +10,12 @@ import { getDotTexture } from "./dotTexture";
 
 const BAR_COUNT = 56; // angular slices around the ring
 const HEIGHT_LAYERS = 24; // vertical density of one column
-// Each column is a small square cross-section filled with points (matching
-// the old boxGeometry's 0.18x0.18 footprint), not a single line of dots —
-// CROSS_SIZE² points per height layer.
+// Each column's cross-section is a CROSS_SIZE x CROSS_SIZE grid with the
+// center cell dropped — a hollow square ring (8 points per layer) instead of
+// a filled block, so the column reads as a point-traced tube with an empty
+// core rather than a solid rod.
 const CROSS_SIZE = 3;
+const CELLS_PER_LAYER = CROSS_SIZE * CROSS_SIZE - 1;
 const FOOTPRINT = 0.16;
 // Baked into each point's base position once (not per-frame) so the
 // cross-section reads as an organically filled rectangle instead of a rigid
@@ -25,6 +27,15 @@ const RADIUS = 2.6;
 // BAR_COUNT ≈ 0.29 at this radius) so columns stay visually distinct instead
 // of bleeding together.
 const JITTER = 0.02;
+// Upper bound of the height curve in useFrame (0.15 floor + 2.4 * a spectrum
+// value that's clamped to [0,1]) — the fixed vertical marks below are laid
+// out across this whole span so the topmost mark lands at the tallest a
+// column can actually get.
+const MAX_BAR_HEIGHT = 0.15 + 2.4;
+// Each mark's baked-in height is nudged off its perfectly even slot by up to
+// this much, so the ring of marks climbing a column doesn't read as a rigid,
+// evenly-spaced ladder.
+const VERTICAL_SWAY = 0.05;
 
 function hexToRgb(hex: string): [number, number, number] {
   const c = new THREE.Color(hex);
@@ -44,11 +55,13 @@ function pseudoRandom(seed: number): number {
 // every frame from precomputed base layout, soft round sprites instead of
 // hard-edged squares, vertex colors, and a second additive glow layer
 // underneath — no meshes, no scene lights. Each of the BAR_COUNT angular
-// slices gets a rectangular column filled with points (HEIGHT_LAYERS tall,
-// CROSS_SIZE² across); a point's Y is `frac * thatColumn'sCurrentHeight`
-// (frac = its fixed slot within the column, 0 at the base, 1 at the tip), so
-// raising a column's height reveals points climbing up it — a particle
-// "fill level" instead of an extruded box.
+// slices is a hollow ring column (HEIGHT_LAYERS tall, CELLS_PER_LAYER points
+// around its perimeter, nothing in the core). Every point carries a fixed
+// "mark" height (`fixedY`, baked once with a little vertical sway so marks
+// aren't perfectly evenly spaced) rather than rescaling with the column —
+// see the `Math.min(fixedY, h)` comment in useFrame for how that turns into
+// marks lighting up as the column grows past them instead of the whole
+// column stretching.
 export default function TerrainScene({
   audio,
   particleColors,
@@ -67,16 +80,18 @@ export default function TerrainScene({
   const bassRgb = useMemo(() => hexToRgb(particleColors.bass), [particleColors.bass]);
   const trebleRgb = useMemo(() => hexToRgb(particleColors.treble), [particleColors.treble]);
 
-  const { barIndex, angle, frac, baseX, baseZ, positions, colors, count } =
+  const { barIndex, angle, frac, fixedY, baseX, baseZ, positions, colors, count } =
     useMemo(() => {
-      const n = BAR_COUNT * HEIGHT_LAYERS * CROSS_SIZE * CROSS_SIZE;
+      const n = BAR_COUNT * HEIGHT_LAYERS * CELLS_PER_LAYER;
       const barIndexArr = new Float32Array(n);
       const angleArr = new Float32Array(n);
       const fracArr = new Float32Array(n);
+      const fixedYArr = new Float32Array(n);
       const baseXArr = new Float32Array(n);
       const baseZArr = new Float32Array(n);
       const positionsArr = new Float32Array(n * 3);
       const colorsArr = new Float32Array(n * 3);
+      const centerCell = Math.floor(CROSS_SIZE / 2);
 
       let idx = 0;
       for (let b = 0; b < BAR_COUNT; b++) {
@@ -95,6 +110,10 @@ export default function TerrainScene({
           const f = h / (HEIGHT_LAYERS - 1);
           for (let cw = 0; cw < CROSS_SIZE; cw++) {
             for (let cd = 0; cd < CROSS_SIZE; cd++) {
+              // Center cell dropped — only the perimeter of the cross-section
+              // grid gets a point, hollowing out the column's core.
+              if (cw === centerCell && cd === centerCell) continue;
+
               const cellSeed = ((b * HEIGHT_LAYERS + h) * CROSS_SIZE + cw) * CROSS_SIZE + cd;
               const gridR =
                 (cw / (CROSS_SIZE - 1) - 0.5) * FOOTPRINT +
@@ -108,13 +127,20 @@ export default function TerrainScene({
               barIndexArr[idx] = b;
               angleArr[idx] = a;
               fracArr[idx] = f;
+              // The base and tip marks stay exactly at 0 / MAX_BAR_HEIGHT
+              // (no sway) so they stay cleanly pinned to the ground and to
+              // the live tip; only marks strictly in between get nudged.
+              fixedYArr[idx] =
+                f <= 0 || f >= 1
+                  ? f * MAX_BAR_HEIGHT
+                  : f * MAX_BAR_HEIGHT + (pseudoRandom(cellSeed + 0.25) - 0.5) * VERTICAL_SWAY;
               baseXArr[idx] = x;
               baseZArr[idx] = z;
               // Seeded at the resting (near-silent) height, not the origin —
               // otherwise every point would flash bunched at (0,0,0) for the
               // one frame before useFrame first runs.
               positionsArr[idx * 3] = x;
-              positionsArr[idx * 3 + 1] = f * 0.15;
+              positionsArr[idx * 3 + 1] = Math.min(fixedYArr[idx], 0.15);
               positionsArr[idx * 3 + 2] = z;
               idx++;
             }
@@ -126,6 +152,7 @@ export default function TerrainScene({
         barIndex: barIndexArr,
         angle: angleArr,
         frac: fracArr,
+        fixedY: fixedYArr,
         baseX: baseXArr,
         baseZ: baseZArr,
         positions: positionsArr,
@@ -188,7 +215,14 @@ export default function TerrainScene({
         noise3D(baseX[i] * 0.6, baseZ[i] * 0.6, t * 0.4 + f * 3) * JITTER;
       const tangent = angle[i] + Math.PI / 2;
       posArr[ix] = baseX[i] + Math.cos(tangent) * wobble;
-      posArr[ix + 1] = f * h;
+      // Marks don't rescale with the column's height — each sits at its own
+      // fixed spot (baked into fixedY) and only becomes visible once the
+      // live tip (h) climbs past it. Until then this min() collapses it up
+      // onto the tip itself, so it reads as riding along with the rising
+      // top rather than floating in empty space above it; the tip mark
+      // (fixedY == MAX_BAR_HEIGHT, always >= h) and base mark (fixedY == 0,
+      // always <= h) fall out of this same expression for free.
+      posArr[ix + 1] = Math.min(fixedY[i], h);
       posArr[ix + 2] = baseZ[i] + Math.sin(tangent) * wobble;
 
       const level = THREE.MathUtils.clamp(spectrum[b], 0, 1);
