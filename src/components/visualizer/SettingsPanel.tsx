@@ -1,22 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  useAppStore,
-  type ColorScheme,
-  type VisualizerMode,
-} from "@/store/useAppStore";
+import { useAppStore, type ColorScheme } from "@/store/useAppStore";
 import type { SystemTheme } from "@/hooks/useSystemTheme";
-import { getOrbColors, getPalette } from "./palettes";
+import { getParticleColors, getPalette } from "./palettes";
 
 const SCHEMES: ColorScheme[] = ["mono", "clay", "sage", "neon"];
 
 export default function SettingsPanel({
-  systemTheme,
-  visualizerMode,
+  theme,
 }: {
-  systemTheme: SystemTheme;
-  visualizerMode: VisualizerMode;
+  theme: SystemTheme;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -80,17 +74,13 @@ export default function SettingsPanel({
             </div>
             <div className="flex gap-2">
               {SCHEMES.map((key) => {
-                const palette = getPalette(key, systemTheme);
-                // Orb mode doesn't render `getPalette`'s bass/treble at all —
-                // it renders `getOrbColors`' variant (see the comment on
-                // that function in palettes.ts). A swatch built from the
-                // wrong pair looks like a settings bug the moment you
-                // compare it against what's actually on screen, so mirror
-                // whichever colors this mode is really drawing with.
-                const swatch =
-                  visualizerMode === "orb"
-                    ? getOrbColors(key, systemTheme)
-                    : palette;
+                const palette = getPalette(key, theme);
+                // Neither scene actually renders `getPalette`'s bass/treble
+                // — both are point clouds and draw from `getParticleColors`
+                // instead (see the comment on that function in palettes.ts).
+                // A swatch built from the wrong pair looks like a settings
+                // bug the moment you compare it against what's on screen.
+                const swatch = getParticleColors(key, theme);
                 const isActive = key === colorScheme;
                 return (
                   <button

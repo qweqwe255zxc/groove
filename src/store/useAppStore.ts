@@ -4,6 +4,9 @@ import type { Album, Track } from "@/lib/itunes";
 
 export type VisualizerMode = "orb" | "terrain";
 export type ColorScheme = "clay" | "mono" | "sage" | "neon";
+// "system" defers to prefers-color-scheme (see useResolvedTheme); "light"/
+// "dark" is an explicit user override of it, set via ThemeToggle.
+export type ThemePreference = "system" | "light" | "dark";
 
 type AppState = {
   query: string;
@@ -23,6 +26,7 @@ type AppState = {
 
   sensitivity: number;
   colorScheme: ColorScheme;
+  themePreference: ThemePreference;
 
   isMenuOpen: boolean;
   introComplete: boolean;
@@ -47,6 +51,7 @@ type AppState = {
   setVisualizerMode: (mode: VisualizerMode) => void;
   setSensitivity: (value: number) => void;
   setColorScheme: (scheme: ColorScheme) => void;
+  setThemePreference: (preference: ThemePreference) => void;
   setMenuOpen: (open: boolean) => void;
   setIntroComplete: () => void;
 };
@@ -67,6 +72,7 @@ export const useAppStore = create<AppState>((set) => ({
 
   sensitivity: 1,
   colorScheme: "mono",
+  themePreference: "system",
 
   isMenuOpen: false,
   introComplete: false,
@@ -89,6 +95,7 @@ export const useAppStore = create<AppState>((set) => ({
   setVisualizerMode: (visualizerMode) => set({ visualizerMode }),
   setSensitivity: (sensitivity) => set({ sensitivity }),
   setColorScheme: (colorScheme) => set({ colorScheme }),
+  setThemePreference: (themePreference) => set({ themePreference }),
   setMenuOpen: (isMenuOpen) => set({ isMenuOpen }),
   setIntroComplete: () => set({ introComplete: true }),
 }));

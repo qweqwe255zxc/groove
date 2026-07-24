@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { useAppStore } from "@/store/useAppStore";
 import HashLink from "./HashLink";
+import ThemeToggle from "./ThemeToggle";
 
 const LINKS = [
   { href: "#top", label: "Index", tagline: "Top" },
@@ -143,7 +144,10 @@ export default function OverlayMenu() {
         <p className="max-w-sm normal-case tracking-normal text-sm">
           Built with Three.js and the Web Audio API.
         </p>
-        <LiveClock />
+        <div className="flex items-center gap-4">
+          <ThemeToggle variant="text" />
+          <LiveClock />
+        </div>
       </div>
     </div>
   );

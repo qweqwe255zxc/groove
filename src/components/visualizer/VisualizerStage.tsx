@@ -7,12 +7,13 @@ import * as THREE from "three";
 import gsap from "gsap";
 import { useAppStore } from "@/store/useAppStore";
 import { useAudioAnalyser } from "@/hooks/useAudioAnalyser";
-import { useSystemTheme } from "@/hooks/useSystemTheme";
-import { getOrbColors, getPalette } from "./palettes";
+import { useResolvedTheme } from "@/hooks/useResolvedTheme";
+import { getParticleColors, getPalette } from "./palettes";
 import OrbScene from "./scenes/OrbScene";
 import TerrainScene from "./scenes/TerrainScene";
 import SettingsPanel from "./SettingsPanel";
 import TrackMeta from "./TrackMeta";
+import ThemeToggle from "@/components/layout/ThemeToggle";
 
 const BASE_CAMERA_POSITION: [number, number, number] = [0, 1.4, 6];
 // Both scenes' content reaches out to roughly this far from the origin (the
@@ -24,6 +25,11 @@ const FIT_RADIUS = 3.6;
 // just past `near`, fully faded to the background by `far`.
 const BASE_FOG_NEAR = 6;
 const BASE_FOG_FAR = 13;
+
+// Only ever used in dark theme — see the comment on `theme`/Bloom below for
+// why light theme skips the Bloom pass entirely instead of needing its own
+// tuning here.
+const DARK_BLOOM_TUNING = { luminanceThreshold: 0.2, luminanceSmoothing: 0.9, intensity: 1.1 };
 
 // A fixed vertical `fov` plus a fixed camera distance only fits the scene at
 // the aspect ratio it was tuned for (desktop, ~16:9). Three.js/R3F derive the
@@ -86,23 +92,23 @@ export default function VisualizerStage() {
   const closeVisualizer = useAppStore((s) => s.closeVisualizer);
 
   const audio = useAudioAnalyser(audioRef, sensitivity);
-  const systemTheme = useSystemTheme();
-  const palette = getPalette(colorScheme, systemTheme);
-  const orbColors = getOrbColors(colorScheme, systemTheme);
+  // "Resolved" rather than "system" — reflects ThemeToggle's manual override
+  // when one is active, falling back to the OS preference otherwise (see
+  // useResolvedTheme).
+  const theme = useResolvedTheme();
+  const palette = getPalette(colorScheme, theme);
+  const particleColors = getParticleColors(colorScheme, theme);
   // Bloom blooms whatever crosses its luminance threshold+smoothing band.
-  // The dark theme gets headroom for free (near-black bg, so almost
-  // anything reads as bright) — a wide smoothing band works fine there
-  // since nothing but the background sits near the bottom of it. The light
-  // theme has no such headroom: its background/bass/treble colors
-  // (palettes.ts) all sit within a ~0.76-0.99 luminance band, so the
-  // threshold+smoothing window has to be narrow and placed precisely in the
-  // gap between the brightest background (~0.91, measured from palettes.ts)
-  // and the dimmest treble (~0.95) — wide smoothing there would catch the
-  // background too, blooming the whole frame instead of just treble.
-  const bloomTuning =
-    systemTheme === "dark"
-      ? { luminanceThreshold: 0.2, luminanceSmoothing: 0.9, intensity: 1.1 }
-      : { luminanceThreshold: 0.915, luminanceSmoothing: 0.035, intensity: 0.8 };
+  // Both scenes render as point clouds (OrbScene.tsx, TerrainScene.tsx) —
+  // dark theme gets its glow for free from Bloom picking up the near-black
+  // background's additive-blended bright points, but in light theme neither
+  // scene has enough pixel coverage in any single point for Bloom's
+  // luminance threshold to grab onto (a sparse field of 1-2px points reads
+  // as "washed out," not "bloomed" — see the comment on getParticleColors in
+  // palettes.ts). Both scenes lean on their own manual additive glow layer
+  // in light theme instead, so Bloom is skipped there entirely rather than
+  // paying for a full-screen postprocessing pass that provably never
+  // contributes a pixel.
 
   useEffect(() => {
     const el = audioRef.current;
@@ -232,28 +238,18 @@ export default function VisualizerStage() {
             <color attach="background" args={[palette.background]} />
             <fog attach="fog" args={[palette.background, BASE_FOG_NEAR, BASE_FOG_FAR]} />
             {visualizerMode === "orb" ? (
-              <OrbScene audio={audio} palette={palette} orbColors={orbColors} theme={systemTheme} />
+              <OrbScene audio={audio} particleColors={particleColors} theme={theme} />
             ) : (
-              <TerrainScene audio={audio} palette={palette} theme={systemTheme} />
+              <TerrainScene audio={audio} particleColors={particleColors} theme={theme} />
             )}
             <EffectComposer>
               {[
-                // Bloom's light-theme threshold (0.915, tightly banded — see
-                // the comment on bloomTuning above) is tuned against
-                // TerrainScene's large solid bars. OrbScene in light theme
-                // renders its own manual additive glow instead (OrbScene.tsx)
-                // using colors that sit *below* that threshold by design
-                // (getOrbColors picks dark/saturated tones, not bright ones)
-                // — so this pass has nothing in that scene to ever catch.
-                // Skipping it there avoids paying for a full-screen
-                // postprocessing pass that provably never contributes a
-                // pixel, rather than leaving it running as dead weight.
-                !(visualizerMode === "orb" && systemTheme === "light") && (
+                theme === "dark" && (
                   <Bloom
                     key="bloom"
-                    luminanceThreshold={bloomTuning.luminanceThreshold}
-                    luminanceSmoothing={bloomTuning.luminanceSmoothing}
-                    intensity={bloomTuning.intensity}
+                    luminanceThreshold={DARK_BLOOM_TUNING.luminanceThreshold}
+                    luminanceSmoothing={DARK_BLOOM_TUNING.luminanceSmoothing}
+                    intensity={DARK_BLOOM_TUNING.intensity}
                     mipmapBlur
                   />
                 ),
@@ -261,7 +257,7 @@ export default function VisualizerStage() {
                   key="vignette"
                   eskil={false}
                   offset={0.15}
-                  darkness={systemTheme === "dark" ? 0.9 : 0.35}
+                  darkness={theme === "dark" ? 0.9 : 0.35}
                 />,
               ].filter((el): el is React.JSX.Element => el !== false)}
             </EffectComposer>
@@ -279,6 +275,12 @@ export default function VisualizerStage() {
             >
               {visualizerMode === "orb" ? "Orb" : "Terrain"}
             </button>
+            {/* SiteHeader (the other place ThemeToggle lives, via
+                OverlayMenu) hides itself whenever this overlay is open — see
+                the comment on that early-return in SiteHeader.tsx — so
+                there'd be no way to flip the theme without first closing the
+                visualizer if it weren't also reachable from here. */}
+            <ThemeToggle />
             <button
               type="button"
               onClick={handleShare}
@@ -307,7 +309,7 @@ export default function VisualizerStage() {
             </button>
           </div>
 
-          <SettingsPanel systemTheme={systemTheme} visualizerMode={visualizerMode} />
+          <SettingsPanel theme={theme} />
         </div>
       )}
     </>

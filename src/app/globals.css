@@ -31,6 +31,37 @@
   }
 }
 
+/* ThemeToggle's manual override (see ThemeEffect.tsx, which stamps this
+   attribute on <html>). An attribute selector on :root is more specific
+   than a bare :root — including the one inside the media query above — so
+   these two blocks reliably win over the OS's prefers-color-scheme in
+   either direction whenever a manual choice is active; when the attribute
+   is absent ("system"), neither rule matches and the media query above
+   decides, same as before ThemeToggle existed. Values are duplicates of
+   the :root/media blocks above by design — one pair driven by the OS, one
+   pair driven by the override, not derived from each other. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #0c0b0a;
+  --color-fg: #f2ede4;
+  --color-muted: #8f8a80;
+  --color-line: #2b2926;
+  --color-accent: #c17a52;
+  --color-surface: #131211;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-bg: #faf7f2;
+  --color-fg: #17140f;
+  --color-muted: #6b6459;
+  --color-line: #c3b6a0;
+  --color-accent: #a6613a;
+  --color-surface: #f1ece2;
+}
+
 @theme inline {
   --color-bg: var(--color-bg);
   --color-fg: var(--color-fg);

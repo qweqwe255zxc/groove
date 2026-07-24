@@ -6,7 +6,7 @@ import * as THREE from "three";
 import { createNoise3D } from "simplex-noise";
 import type { AudioApi } from "@/hooks/useAudioAnalyser";
 import type { SystemTheme } from "@/hooks/useSystemTheme";
-import type { Palette } from "../palettes";
+import { getDotTexture } from "./dotTexture";
 
 const DETAIL = 34; // icosahedron subdivision — ~10*DETAIL^2+2 points, dense enough to read as a solid cloud
 const BASE_RADIUS = 1.6;
@@ -29,49 +29,13 @@ function hexToRgb(hex: string): [number, number, number] {
   return [c.r, c.g, c.b];
 }
 
-// THREE.PointsMaterial with no `map` draws every point as a hard-edged
-// square — at this point size (0.022 world units, sub-pixel at typical
-// camera distance) that reads as a fine, grainy stipple rather than a
-// smooth cloud, especially in light theme where there's no Bloom blur
-// (see the Bloom-skip comment in VisualizerStage) to soften it. A radial
-// falloff sprite gives each point a soft round edge instead, so
-// overlapping neighbors blend into a continuous-looking surface. Built
-// once and reused for the life of the module rather than regenerated
-// per-mount — it never depends on props/theme, just a fixed gradient.
-let dotTexture: THREE.Texture | null = null;
-function getDotTexture(): THREE.Texture {
-  if (dotTexture) return dotTexture;
-  const size = 64;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  const gradient = ctx.createRadialGradient(
-    size / 2,
-    size / 2,
-    0,
-    size / 2,
-    size / 2,
-    size / 2
-  );
-  gradient.addColorStop(0, "rgba(255,255,255,1)");
-  gradient.addColorStop(0.5, "rgba(255,255,255,0.7)");
-  gradient.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, size, size);
-  dotTexture = new THREE.CanvasTexture(canvas);
-  return dotTexture;
-}
-
 export default function OrbScene({
   audio,
-  palette,
-  orbColors,
+  particleColors,
   theme,
 }: {
   audio: AudioApi;
-  palette: Palette;
-  orbColors: { bass: string; treble: string };
+  particleColors: { bass: string; treble: string };
   theme: SystemTheme;
 }) {
   const groupRef = useRef<THREE.Group>(null);
@@ -90,14 +54,14 @@ export default function OrbScene({
   const velocity = useRef({ rotX: 0, rotY: 0 });
   const momentum = useRef({ rotX: 0, rotY: 0 });
 
-  // Memoized like TerrainScene's identical bassColor/trebleColor — recomputing
-  // these via `new THREE.Color(hex)` inside the useFrame loop below would
-  // allocate two objects every single frame instead of only when the palette
-  // actually changes. `orbColors` rather than `palette.bass`/`palette.treble`
-  // — see the comment on getOrbColors in palettes.ts for why the orb can't
-  // just reuse the same light-theme colors TerrainScene/Bloom use.
-  const bassRgb = useMemo(() => hexToRgb(orbColors.bass), [orbColors.bass]);
-  const trebleRgb = useMemo(() => hexToRgb(orbColors.treble), [orbColors.treble]);
+  // Memoized rather than `new THREE.Color(hex)`-ing inside the useFrame loop
+  // below, which would allocate two objects every single frame instead of
+  // only when the palette actually changes. `particleColors` rather than a
+  // `Palette`'s `bass`/`treble` — see the comment on getParticleColors in
+  // palettes.ts for why a point cloud can't just reuse the colors tuned for
+  // Bloom against a solid fill.
+  const bassRgb = useMemo(() => hexToRgb(particleColors.bass), [particleColors.bass]);
+  const trebleRgb = useMemo(() => hexToRgb(particleColors.treble), [particleColors.treble]);
   const dotMap = useMemo(() => getDotTexture(), []);
 
   useEffect(() => {
@@ -367,14 +331,11 @@ export default function OrbScene({
           vertexColors
           transparent
           opacity={isLight ? 1 : 0.9}
-          blending={palette.blending}
+          blending={isLight ? THREE.NormalBlending : THREE.AdditiveBlending}
           // Additive blending is order-independent, so depthWrite has always
           // been off for it; normal blending (the light-theme variant) needs
           // it back on, or the far side of the sphere draws in an arbitrary
-          // order and shows through the near side. `palette.blending` is
-          // itself 1:1 derived from `theme` (see getPalette), so keying off
-          // `theme` directly here avoids re-deriving the same condition from
-          // a rendering side effect.
+          // order and shows through the near side.
           depthWrite={isLight}
         />
       </points>
