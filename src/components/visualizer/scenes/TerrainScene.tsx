@@ -4,6 +4,7 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { AudioApi } from "@/hooks/useAudioAnalyser";
+import type { SystemTheme } from "@/hooks/useSystemTheme";
 import type { Palette } from "../palettes";
 
 const BAR_COUNT = 56;
@@ -12,9 +13,11 @@ const RADIUS = 2.6;
 export default function TerrainScene({
   audio,
   palette,
+  theme,
 }: {
   audio: AudioApi;
   palette: Palette;
+  theme: SystemTheme;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const barsRef = useRef<THREE.Mesh[]>([]);
@@ -36,6 +39,12 @@ export default function TerrainScene({
   const bassColor = useMemo(() => new THREE.Color(palette.bass), [palette.bass]);
   const trebleColor = useMemo(() => new THREE.Color(palette.treble), [palette.treble]);
   const mixColor = useRef(new THREE.Color());
+  // The point lights below were tuned for a near-black scene, where they add
+  // mood without any risk of overexposure. Against the light theme's already
+  // bright backdrop, the same intensities plus the emissive bars blew the
+  // whole frame out to solid white under Bloom — scaled down here so the
+  // lights still shape the bars without themselves being the thing blooming.
+  const isLight = theme === "light";
 
   useFrame((_, delta) => {
     const group = groupRef.current;
@@ -61,7 +70,7 @@ export default function TerrainScene({
       mixColor.current.lerpColors(bassColor, trebleColor, level);
       material.color.copy(mixColor.current);
       material.emissive.copy(mixColor.current);
-      material.emissiveIntensity = 0.15 + level * 1.4;
+      material.emissiveIntensity = isLight ? 0.1 + level * 0.9 : 0.15 + level * 1.4;
     }
 
     group.rotation.y += delta * (0.05 + (energy / BAR_COUNT) * 0.25);
@@ -69,10 +78,10 @@ export default function TerrainScene({
 
   return (
     <>
-      <ambientLight intensity={0.35} />
-      <pointLight position={[0, 5, 0]} intensity={25} color={palette.bass} />
-      <pointLight position={[0, -2, -4]} intensity={12} color={palette.treble} />
-      <directionalLight position={[3, 4, 5]} intensity={0.6} />
+      <ambientLight intensity={isLight ? 0.6 : 0.35} />
+      <pointLight position={[0, 5, 0]} intensity={isLight ? 3 : 25} color={palette.bass} />
+      <pointLight position={[0, -2, -4]} intensity={isLight ? 1.5 : 12} color={palette.treble} />
+      <directionalLight position={[3, 4, 5]} intensity={isLight ? 0.9 : 0.6} />
       <group ref={groupRef}>
         {layout.map((pos, i) => (
           <mesh

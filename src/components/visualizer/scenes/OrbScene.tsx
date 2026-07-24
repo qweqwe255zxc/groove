@@ -5,6 +5,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { createNoise3D } from "simplex-noise";
 import type { AudioApi } from "@/hooks/useAudioAnalyser";
+import type { SystemTheme } from "@/hooks/useSystemTheme";
 import type { Palette } from "../palettes";
 
 const DETAIL = 34; // icosahedron subdivision — ~10*DETAIL^2+2 points, dense enough to read as a solid cloud
@@ -23,12 +24,50 @@ function hexToRgb(hex: string): [number, number, number] {
   return [c.r, c.g, c.b];
 }
 
+// THREE.PointsMaterial with no `map` draws every point as a hard-edged
+// square — at this point size (0.022 world units, sub-pixel at typical
+// camera distance) that reads as a fine, grainy stipple rather than a
+// smooth cloud, especially in light theme where there's no Bloom blur
+// (see the Bloom-skip comment in VisualizerStage) to soften it. A radial
+// falloff sprite gives each point a soft round edge instead, so
+// overlapping neighbors blend into a continuous-looking surface. Built
+// once and reused for the life of the module rather than regenerated
+// per-mount — it never depends on props/theme, just a fixed gradient.
+let dotTexture: THREE.Texture | null = null;
+function getDotTexture(): THREE.Texture {
+  if (dotTexture) return dotTexture;
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const gradient = ctx.createRadialGradient(
+    size / 2,
+    size / 2,
+    0,
+    size / 2,
+    size / 2,
+    size / 2
+  );
+  gradient.addColorStop(0, "rgba(255,255,255,1)");
+  gradient.addColorStop(0.5, "rgba(255,255,255,0.7)");
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  dotTexture = new THREE.CanvasTexture(canvas);
+  return dotTexture;
+}
+
 export default function OrbScene({
   audio,
   palette,
+  orbColors,
+  theme,
 }: {
   audio: AudioApi;
   palette: Palette;
+  orbColors: { bass: string; treble: string };
+  theme: SystemTheme;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const pointsRef = useRef<THREE.Points>(null);
@@ -46,6 +85,16 @@ export default function OrbScene({
   const velocity = useRef({ rotX: 0, rotY: 0 });
   const momentum = useRef({ rotX: 0, rotY: 0 });
 
+  // Memoized like TerrainScene's identical bassColor/trebleColor — recomputing
+  // these via `new THREE.Color(hex)` inside the useFrame loop below would
+  // allocate two objects every single frame instead of only when the palette
+  // actually changes. `orbColors` rather than `palette.bass`/`palette.treble`
+  // — see the comment on getOrbColors in palettes.ts for why the orb can't
+  // just reuse the same light-theme colors TerrainScene/Bloom use.
+  const bassRgb = useMemo(() => hexToRgb(orbColors.bass), [orbColors.bass]);
+  const trebleRgb = useMemo(() => hexToRgb(orbColors.treble), [orbColors.treble]);
+  const dotMap = useMemo(() => getDotTexture(), []);
+
   useEffect(() => {
     const el = gl.domElement;
     const ROTATE_SPEED = 0.008; // radians of orbit rotation per pixel of drag
@@ -53,6 +102,13 @@ export default function OrbScene({
     function handlePointerDown(e: PointerEvent) {
       isDragging.current = true;
       momentum.current = { rotX: 0, rotY: 0 };
+      // Also reset velocity, not just momentum — a plain click (down+up with
+      // no move in between) never touches `velocity.current` in
+      // handlePointerMove, so without this it still held whatever speed the
+      // *previous* drag ended at, and handlePointerUp below would hand that
+      // stale value straight to momentum, spinning the orb from a click that
+      // never dragged at all.
+      velocity.current = { rotX: 0, rotY: 0 };
       lastPointer.current = { x: e.clientX, y: e.clientY, time: performance.now() };
       el.setPointerCapture(e.pointerId);
     }
@@ -147,12 +203,29 @@ export default function OrbScene({
       };
     }, []);
 
+  // One real geometry shared by both the solid point layer and (in light
+  // theme) the additive glow layer beneath it, so a single needsUpdate per
+  // frame below keeps both in sync — there's only one underlying GPU
+  // buffer, just two materials/draw calls reading it.
+  const sharedGeometry = useMemo(() => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    return geo;
+  }, [positions, colors]);
+
   useFrame((state, delta) => {
     const { bass, overall } = audio.getBands();
     const spectrum = audio.getSpectrum(SPECTRUM_BINS);
     const points = pointsRef.current;
     if (!points) return;
 
+    // Read through the ref (rather than the `sharedGeometry` variable
+    // directly) — same underlying THREE.BufferGeometry either way (it's
+    // passed as the `geometry` prop on the ref'd <points> below), but going
+    // through `points.geometry` here is what keeps the React Compiler's
+    // lint rule against mutating a hook's return value from firing on the
+    // in-place array writes below.
     const posAttr = points.geometry.getAttribute(
       "position"
     ) as THREE.BufferAttribute;
@@ -163,8 +236,8 @@ export default function OrbScene({
     const colorArr = colorAttr.array as Float32Array;
 
     const t = state.clock.elapsedTime;
-    const [bassR, bassG, bassB] = hexToRgb(palette.bass);
-    const [trebleR, trebleG, trebleB] = hexToRgb(palette.treble);
+    const [bassR, bassG, bassB] = bassRgb;
+    const [trebleR, trebleG, trebleB] = trebleRgb;
 
     for (let i = 0; i < count; i++) {
       const ix = i * 3;
@@ -240,21 +313,59 @@ export default function OrbScene({
     }
   });
 
+  const isLight = theme === "light";
+
   return (
     <group ref={groupRef}>
-      <points ref={pointsRef}>
-        <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[positions, 3]} />
-          <bufferAttribute attach="attributes-color" args={[colors, 3]} />
-        </bufferGeometry>
+      {
+        // Dark theme gets its glow for free: AdditiveBlending on a
+        // near-black background makes even a faint point read as glowing,
+        // and the postprocessing Bloom pass (VisualizerStage) picks up the
+        // rest. Light theme can't use additive (it'd just clip every point
+        // straight to white against the light bg — see palettes.ts), so it
+        // renders with NormalBlending instead — but that's flat alpha
+        // compositing, not glow, and Bloom's luminance threshold has almost
+        // nothing to grab onto on a field of 1-2px points (unlike
+        // TerrainScene's large solid bars, there's no meaningful pixel area
+        // to bloom). So light theme gets its own manual glow: a second,
+        // larger, low-opacity, *additively* blended copy of the same point
+        // cloud underneath the crisp solid layer — a real soft halo around
+        // each point instead of relying on postprocessing that can't see
+        // sparse points, and since it reads the same live color buffer, the
+        // glow already brightens toward `treble` exactly where the solid
+        // layer does.
+        isLight && (
+          <points geometry={sharedGeometry}>
+            <pointsMaterial
+              map={dotMap}
+              size={0.05}
+              sizeAttenuation
+              vertexColors
+              transparent
+              opacity={0.16}
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+            />
+          </points>
+        )
+      }
+      <points ref={pointsRef} geometry={sharedGeometry}>
         <pointsMaterial
-          size={0.022}
+          map={dotMap}
+          size={isLight ? 0.032 : 0.022}
           sizeAttenuation
           vertexColors
           transparent
-          opacity={0.9}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
+          opacity={isLight ? 1 : 0.9}
+          blending={palette.blending}
+          // Additive blending is order-independent, so depthWrite has always
+          // been off for it; normal blending (the light-theme variant) needs
+          // it back on, or the far side of the sphere draws in an arbitrary
+          // order and shows through the near side. `palette.blending` is
+          // itself 1:1 derived from `theme` (see getPalette), so keying off
+          // `theme` directly here avoids re-deriving the same condition from
+          // a rendering side effect.
+          depthWrite={isLight}
         />
       </points>
     </group>

@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { EffectComposer, Bloom, Vignette } from "@react-three/postprocessing";
 import * as THREE from "three";
 import gsap from "gsap";
 import { useAppStore } from "@/store/useAppStore";
 import { useAudioAnalyser } from "@/hooks/useAudioAnalyser";
-import { PALETTES } from "./palettes";
+import { useSystemTheme } from "@/hooks/useSystemTheme";
+import { getOrbColors, getPalette } from "./palettes";
 import OrbScene from "./scenes/OrbScene";
 import TerrainScene from "./scenes/TerrainScene";
 import SettingsPanel from "./SettingsPanel";
@@ -73,6 +74,7 @@ export default function VisualizerStage() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
 
+  const selectedAlbum = useAppStore((s) => s.selectedAlbum);
   const activeTrack = useAppStore((s) => s.activeTrack);
   const isPlaying = useAppStore((s) => s.isPlaying);
   const isVisualizerOpen = useAppStore((s) => s.isVisualizerOpen);
@@ -84,7 +86,23 @@ export default function VisualizerStage() {
   const closeVisualizer = useAppStore((s) => s.closeVisualizer);
 
   const audio = useAudioAnalyser(audioRef, sensitivity);
-  const palette = PALETTES[colorScheme];
+  const systemTheme = useSystemTheme();
+  const palette = getPalette(colorScheme, systemTheme);
+  const orbColors = getOrbColors(colorScheme, systemTheme);
+  // Bloom blooms whatever crosses its luminance threshold+smoothing band.
+  // The dark theme gets headroom for free (near-black bg, so almost
+  // anything reads as bright) — a wide smoothing band works fine there
+  // since nothing but the background sits near the bottom of it. The light
+  // theme has no such headroom: its background/bass/treble colors
+  // (palettes.ts) all sit within a ~0.76-0.99 luminance band, so the
+  // threshold+smoothing window has to be narrow and placed precisely in the
+  // gap between the brightest background (~0.91, measured from palettes.ts)
+  // and the dimmest treble (~0.95) — wide smoothing there would catch the
+  // background too, blooming the whole frame instead of just treble.
+  const bloomTuning =
+    systemTheme === "dark"
+      ? { luminanceThreshold: 0.2, luminanceSmoothing: 0.9, intensity: 1.1 }
+      : { luminanceThreshold: 0.915, luminanceSmoothing: 0.035, intensity: 0.8 };
 
   useEffect(() => {
     const el = audioRef.current;
@@ -92,6 +110,25 @@ export default function VisualizerStage() {
     el.src = activeTrack.previewUrl;
     el.load();
   }, [activeTrack?.previewUrl]);
+
+  // Keeps the address bar itself pointing at /v/[collectionId]/[trackId]
+  // whenever a track is active, so the link is right there to copy without
+  // needing the Share button — not just something Share generates on
+  // click. `history.replaceState` rather than the Next.js router: routing
+  // there for real would re-run the /v page's server fetch and remount
+  // DeepLinkVisualizer, which calls `openTrack` (isPlaying forced back to
+  // false) — pausing whatever's actually playing just because the URL
+  // changed. This only touches what's shown in the address bar.
+  useEffect(() => {
+    if (selectedAlbum && activeTrack) {
+      const url = `/v/${selectedAlbum.collectionId}/${activeTrack.trackId}`;
+      if (window.location.pathname !== url) {
+        window.history.replaceState(null, "", url);
+      }
+    } else if (!selectedAlbum && window.location.pathname !== "/") {
+      window.history.replaceState(null, "", "/");
+    }
+  }, [selectedAlbum, activeTrack]);
 
   useEffect(() => {
     const el = audioRef.current;
@@ -102,7 +139,12 @@ export default function VisualizerStage() {
     } else {
       el.pause();
     }
-  }, [isPlaying, audio, togglePlaying]);
+    // `activeTrack?.previewUrl` is also a dependency, not just `isPlaying` —
+    // without it, switching to a new track while already playing (isPlaying
+    // staying `true` across the switch) wouldn't re-run this effect at all,
+    // since React only reruns on a dependency's value actually changing. The
+    // new src would load (the other effect above) but never actually play.
+  }, [isPlaying, activeTrack?.previewUrl, audio, togglePlaying]);
 
   // Entrance fade — this used to just pop in instantly on the same frame
   // as the click, the only overlay in the app with no opening transition.
@@ -136,6 +178,19 @@ export default function VisualizerStage() {
       onComplete: closeVisualizer,
     });
   }, [closeVisualizer]);
+
+  const [shareCopied, setShareCopied] = useState(false);
+  const handleShare = useCallback(() => {
+    if (!selectedAlbum || !activeTrack) return;
+    const url = `${window.location.origin}/v/${selectedAlbum.collectionId}/${activeTrack.trackId}`;
+    navigator.clipboard
+      .writeText(url)
+      .then(() => {
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 1500);
+      })
+      .catch(() => {});
+  }, [selectedAlbum, activeTrack]);
 
   // Space toggles playback, Escape closes the overlay. Both call
   // preventDefault(): without it, Space would ALSO re-click whichever button
@@ -177,18 +232,38 @@ export default function VisualizerStage() {
             <color attach="background" args={[palette.background]} />
             <fog attach="fog" args={[palette.background, BASE_FOG_NEAR, BASE_FOG_FAR]} />
             {visualizerMode === "orb" ? (
-              <OrbScene audio={audio} palette={palette} />
+              <OrbScene audio={audio} palette={palette} orbColors={orbColors} theme={systemTheme} />
             ) : (
-              <TerrainScene audio={audio} palette={palette} />
+              <TerrainScene audio={audio} palette={palette} theme={systemTheme} />
             )}
             <EffectComposer>
-              <Bloom
-                luminanceThreshold={0.2}
-                luminanceSmoothing={0.9}
-                intensity={1.1}
-                mipmapBlur
-              />
-              <Vignette eskil={false} offset={0.15} darkness={0.9} />
+              {[
+                // Bloom's light-theme threshold (0.915, tightly banded — see
+                // the comment on bloomTuning above) is tuned against
+                // TerrainScene's large solid bars. OrbScene in light theme
+                // renders its own manual additive glow instead (OrbScene.tsx)
+                // using colors that sit *below* that threshold by design
+                // (getOrbColors picks dark/saturated tones, not bright ones)
+                // — so this pass has nothing in that scene to ever catch.
+                // Skipping it there avoids paying for a full-screen
+                // postprocessing pass that provably never contributes a
+                // pixel, rather than leaving it running as dead weight.
+                !(visualizerMode === "orb" && systemTheme === "light") && (
+                  <Bloom
+                    key="bloom"
+                    luminanceThreshold={bloomTuning.luminanceThreshold}
+                    luminanceSmoothing={bloomTuning.luminanceSmoothing}
+                    intensity={bloomTuning.intensity}
+                    mipmapBlur
+                  />
+                ),
+                <Vignette
+                  key="vignette"
+                  eskil={false}
+                  offset={0.15}
+                  darkness={systemTheme === "dark" ? 0.9 : 0.35}
+                />,
+              ].filter((el): el is React.JSX.Element => el !== false)}
             </EffectComposer>
           </Canvas>
 
@@ -203,6 +278,14 @@ export default function VisualizerStage() {
               className="rounded-full border border-line px-4 py-2 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg cursor-pointer"
             >
               {visualizerMode === "orb" ? "Orb" : "Terrain"}
+            </button>
+            <button
+              type="button"
+              onClick={handleShare}
+              disabled={!selectedAlbum || !activeTrack}
+              className="rounded-full border border-line px-4 py-2 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {shareCopied ? "Copied" : "Share"}
             </button>
             <button
               type="button"
@@ -224,7 +307,7 @@ export default function VisualizerStage() {
             </button>
           </div>
 
-          <SettingsPanel />
+          <SettingsPanel systemTheme={systemTheme} visualizerMode={visualizerMode} />
         </div>
       )}
     </>

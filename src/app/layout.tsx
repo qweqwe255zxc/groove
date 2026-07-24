@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Fraunces, Space_Grotesk } from "next/font/google";
 import SmoothScrollProvider from "@/components/layout/SmoothScrollProvider";
 import SiteHeader from "@/components/layout/SiteHeader";
@@ -24,9 +24,16 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "Spinner — audio-reactive album visualizer",
+  title: "Groove — audio-reactive album visualizer",
   description:
-    "Search albums, spin the record, and watch the mix react in real time.",
+    "Search an album, play a preview, and watch it react to the sound in real time.",
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#0c0b0a" },
+    { media: "(prefers-color-scheme: light)", color: "#faf7f2" },
+  ],
 };
 
 export default function RootLayout({

@@ -13,12 +13,11 @@ export default function Home() {
           Audio-reactive album visualizer
         </p>
         <h1 className="mt-4 max-w-4xl font-display text-[13vw] italic leading-[0.95] sm:text-[7vw]">
-          Spin the record, watch the mix.
+          Sound, visualized.
         </h1>
         <p className="mt-6 max-w-md text-muted">
-          Search any artist or album from the iTunes catalog, drop the needle
-          on a 30-second preview, and watch a fullscreen scene react to its
-          frequencies in real time.
+          Search any artist or album, play a 30-second preview, and watch a
+          fullscreen scene respond to its frequencies in real time.
         </p>
         <HashLink
           href="#library"
@@ -41,9 +40,9 @@ export default function Home() {
           About
         </h2>
         <p className="mt-6 max-w-md text-muted">
-          Album art and 30-second previews come straight from the iTunes
-          Search API. Frequency data is read live from the Web Audio API and
-          pushed into a Three.js scene — nothing here is pre-rendered.
+          Album art and previews come from the iTunes Search API. Frequency
+          data comes from the Web Audio API and drives a Three.js scene in
+          real time — nothing here is pre-rendered.
         </p>
       </section>
     </main>

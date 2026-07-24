@@ -34,6 +34,14 @@ type AppState = {
   setTracks: (tracks: Track[]) => void;
   setPendingFlipState: (state: Flip.FlipState | null) => void;
   playTrack: (track: Track) => void;
+  // Same as playTrack but leaves isPlaying false — used by the /v deep-link
+  // route, which opens straight into the visualizer on page load. Autoplay
+  // requires a real user gesture (see the crossOrigin/AudioContext gotcha
+  // in CLAUDE.md); a cold page load has none, so el.play() would just be
+  // silently blocked while isPlaying claimed the track was already playing.
+  // Landing paused with the Play button visible is honest about needing
+  // that first click.
+  openTrack: (track: Track) => void;
   togglePlaying: (playing?: boolean) => void;
   closeVisualizer: () => void;
   setVisualizerMode: (mode: VisualizerMode) => void;
@@ -72,6 +80,8 @@ export const useAppStore = create<AppState>((set) => ({
   setPendingFlipState: (pendingFlipState) => set({ pendingFlipState }),
   playTrack: (track) =>
     set({ activeTrack: track, isPlaying: true, isVisualizerOpen: true }),
+  openTrack: (track) =>
+    set({ activeTrack: track, isPlaying: false, isVisualizerOpen: true }),
   togglePlaying: (playing) =>
     set((state) => ({ isPlaying: playing ?? !state.isPlaying })),
   closeVisualizer: () =>

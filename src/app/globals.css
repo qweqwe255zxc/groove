@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: dark;
+
   --color-bg: #0c0b0a;
   --color-fg: #f2ede4;
   --color-muted: #8f8a80;
@@ -10,6 +12,23 @@
 
   --font-display: var(--font-fraunces);
   --font-sans: var(--font-space-grotesk);
+}
+
+/* Mirrors the dark palette above — same warm hue relationships, flipped
+   lightness, with --color-muted/--color-accent deepened a step so they
+   still clear ~4.5:1 contrast against a near-white background (the
+   originals were tuned for contrast against near-black instead). */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    --color-bg: #faf7f2;
+    --color-fg: #17140f;
+    --color-muted: #6b6459;
+    --color-line: #ded5c7;
+    --color-accent: #a6613a;
+    --color-surface: #f1ece2;
+  }
 }
 
 @theme inline {

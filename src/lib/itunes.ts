@@ -45,6 +45,19 @@ function upscaleArtwork(url: string | undefined, size = 600): string {
   return url.replace(/\d+x\d+bb\.(jpg|png)$/, `${size}x${size}bb.$1`);
 }
 
+// `new Date(malformed).getUTCFullYear()` returns NaN, not undefined —
+// without the isNaN check a malformed releaseDate would render the literal
+// string "NaN" instead of falling back to "—" like a missing date already
+// does. Uses the UTC getter, not the local-timezone one — iTunes returns UTC
+// timestamps, and near a year boundary (e.g. `1997-01-01T02:00:00Z`) the
+// local getter can roll the date back a day in timezones west of UTC,
+// reporting the wrong year.
+function releaseYear(releaseDate: string | undefined): string {
+  if (!releaseDate) return "—";
+  const year = new Date(releaseDate).getUTCFullYear();
+  return Number.isNaN(year) ? "—" : String(year);
+}
+
 function toAlbum(raw: RawAlbum): Album | null {
   if (!raw.collectionId || !raw.collectionName) return null;
   return {
@@ -53,7 +66,7 @@ function toAlbum(raw: RawAlbum): Album | null {
     collectionName: raw.collectionName,
     artworkUrl: upscaleArtwork(raw.artworkUrl100),
     genre: raw.primaryGenreName ?? "Unknown genre",
-    year: raw.releaseDate ? String(new Date(raw.releaseDate).getFullYear()) : "—",
+    year: releaseYear(raw.releaseDate),
     trackCount: raw.trackCount ?? 0,
   };
 }
@@ -105,6 +118,20 @@ export async function getFeaturedAlbums(): Promise<Album[]> {
 }
 
 export async function getAlbumTracks(collectionId: number): Promise<Track[]> {
+  const { tracks } = await lookupAlbum(collectionId);
+  return tracks;
+}
+
+// `/lookup?id=<collectionId>&entity=song` returns the album itself
+// (`wrapperType: "collection"`) as the first result *and* every track in
+// the same call — getAlbumTracks only needed the tracks, but the deep-link
+// visualizer route (src/app/v/[collectionId]/[trackId]) needs the album
+// too, to open straight into the visualizer without a search step. One
+// shared lookup instead of two separate endpoints for what's already a
+// single API response.
+async function lookupAlbum(
+  collectionId: number
+): Promise<{ album: Album | null; tracks: Track[] }> {
   const url = `${ITUNES_BASE}/lookup?${new URLSearchParams({
     id: String(collectionId),
     entity: "song",
@@ -112,9 +139,10 @@ export async function getAlbumTracks(collectionId: number): Promise<Track[]> {
 
   const res = await fetch(url, { next: { revalidate: 86400 } });
   if (!res.ok) throw new Error(`iTunes lookup failed: ${res.status}`);
-  const data = (await res.json()) as { results: RawTrack[] };
+  const data = (await res.json()) as { results: (RawAlbum & RawTrack)[] };
 
-  return data.results
+  const collection = data.results.find((r) => r.wrapperType === "collection");
+  const tracks = data.results
     .filter((r) => r.wrapperType === "track")
     .map((r) => ({
       trackId: r.trackId,
@@ -124,4 +152,12 @@ export async function getAlbumTracks(collectionId: number): Promise<Track[]> {
       durationMs: r.trackTimeMillis ?? 0,
     }))
     .sort((a, b) => a.trackNumber - b.trackNumber);
+
+  return { album: collection ? toAlbum(collection) : null, tracks };
+}
+
+export async function getAlbumWithTracks(
+  collectionId: number
+): Promise<{ album: Album | null; tracks: Track[] }> {
+  return lookupAlbum(collectionId);
 }

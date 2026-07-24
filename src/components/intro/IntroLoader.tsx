@@ -47,8 +47,9 @@ export default function IntroLoader() {
     });
 
     tl.from(wordmarkRef.current, {
-      yPercent: 110,
-      duration: 0.8,
+      yPercent: 20,
+      autoAlpha: 0,
+      duration: 1,
       ease: "expo.out",
     }).to(
       counter,
@@ -81,8 +82,20 @@ export default function IntroLoader() {
     >
       <div ref={contentRef} className="flex flex-col items-center gap-6">
         <div className="overflow-hidden">
-          <p ref={wordmarkRef} className="font-display text-[14vw] italic leading-none sm:text-[8vw]">
-            spinner
+          {/* leading-[1.6]: Fraunces italic's own metrics (ascent+descent)
+              already sum to ~1.23em — more than a full 1-line-height box —
+              and the "g"'s ink descent sits almost exactly at the font's
+              reported descent (measured via canvas measureText against the
+              rendered element). leading-none/leading-1 clips its tail
+              against this overflow-hidden mask; 1.6 leaves enough room
+              below the baseline to clear it. The entrance tween below fades
+              opacity in alongside the slide (autoAlpha) so the letters
+              don't pop to full-black opacity the instant they cross this
+              clip edge — a plain position-only slide against a hard clip
+              reads as a flat block snapping into place rather than the
+              word rising into view. */}
+          <p ref={wordmarkRef} className="font-display text-[14vw] italic leading-[1.6] sm:text-[8vw]">
+            groove
           </p>
         </div>
         <div className="flex items-center gap-3 text-xs uppercase tracking-[0.3em] text-muted">

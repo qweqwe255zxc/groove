@@ -6,9 +6,9 @@ import { useAppStore } from "@/store/useAppStore";
 import HashLink from "./HashLink";
 
 const LINKS = [
-  { href: "#top", label: "Index", tagline: "Back to the top" },
-  { href: "#library", label: "Library", tagline: "Search the catalog" },
-  { href: "#about", label: "About", tagline: "How this is built" },
+  { href: "#top", label: "Index", tagline: "Top" },
+  { href: "#library", label: "Library", tagline: "Catalog" },
+  { href: "#about", label: "About", tagline: "How it works" },
 ] as const;
 
 function LiveClock() {
@@ -141,8 +141,7 @@ export default function OverlayMenu() {
         className="mt-8 flex max-w-lg flex-wrap items-center justify-between gap-x-8 gap-y-2 text-xs uppercase tracking-[0.2em] text-muted"
       >
         <p className="max-w-sm normal-case tracking-normal text-sm">
-          Search any artist or album, drop the needle, and watch the
-          frequencies move.
+          Built with Three.js and the Web Audio API.
         </p>
         <LiveClock />
       </div>

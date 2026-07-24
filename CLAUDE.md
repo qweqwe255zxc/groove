@@ -1,6 +1,6 @@
 @AGENTS.md
 
-# Spinner — audio-reactive album visualizer
+# Groove — audio-reactive album visualizer
 
 Next.js 16 (App Router, TS) + Tailwind v4. Search iTunes for an album, expand its
 cover into a spinning vinyl, hit play, and a fullscreen Three.js scene reacts to
@@ -11,6 +11,16 @@ the track's frequencies in real time.
 - `npm run dev` — dev server
 - `npm run build` / `npm run start` — production build/serve
 - `npm run lint`
+
+**Always kill the dev server once you're done with it.** If you start
+`npm run dev` in the background to check a change (curl, Playwright,
+screenshots), kill the process on port 3000 as your last step —
+`lsof -ti:3000 | xargs -r kill`. A Turbopack dev server left running across
+many edit/verify cycles in the same session can accumulate enough stale
+incremental-build state to start 404ing on routes that build and serve fine
+from a fresh process; this has actually happened. If a stray one turns up,
+kill it (`kill -9`, then confirm `lsof -ti:3000` is empty), delete `.next`,
+and start clean.
 
 ## Stack
 

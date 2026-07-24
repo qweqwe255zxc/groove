@@ -5,8 +5,13 @@ import gsap from "gsap";
 
 const BASE_CLASSES =
   "pointer-events-none fixed left-0 top-0 z-[200] rounded-full opacity-0 mix-blend-difference transition-[width,height,background-color,border-width] duration-300 ease-out";
-const DOT_CLASSES = "h-2.5 w-2.5 border-0 bg-fg";
-const RING_CLASSES = "h-12 w-12 border border-fg bg-transparent";
+// Fixed white, not `bg-fg`/`border-fg` — `mix-blend-difference` only inverts
+// cleanly against an arbitrary backdrop when the source itself is white
+// (difference(white, X) = 255-X, a true invert). Tying it to the theme's
+// foreground color broke this in light mode: --color-fg became dark there,
+// and difference(dark, light-bg) washes out to a barely-visible gray instead.
+const DOT_CLASSES = "h-2.5 w-2.5 border-0 bg-white";
+const RING_CLASSES = "h-12 w-12 border border-white bg-transparent";
 
 function isInteractive(target: EventTarget | null) {
   return (

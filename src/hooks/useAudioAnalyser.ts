@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 export type FrequencyBands = {
   bass: number; // 0..1
@@ -67,12 +67,12 @@ export function useAudioAnalyser(
     };
   }, [audioRef]);
 
-  function resume() {
+  const resume = useCallback(() => {
     const ctx = ctxRef.current;
     if (ctx && ctx.state === "suspended") ctx.resume();
-  }
+  }, []);
 
-  function getBands(): FrequencyBands {
+  const getBands = useCallback((): FrequencyBands => {
     const analyser = analyserRef.current;
     const data = dataRef.current;
     if (!analyser || !data) return { bass: 0, mid: 0, treble: 0, overall: 0 };
@@ -103,13 +103,13 @@ export function useAudioAnalyser(
       treble: Math.min(treble, 1.6),
       overall: Math.min(overall, 1.6),
     };
-  }
+  }, []);
 
   // Resamples the analyser's frequency bins down to `bins` buckets, reusing
   // one Float32Array (sized to the last requested `bins`) to stay allocation-free
   // in a useFrame loop. The top ~15% of bins is dropped — it's near-silent for
   // most music and would otherwise flatten the visible bars.
-  function getSpectrum(bins: number): Float32Array {
+  const getSpectrum = useCallback((bins: number): Float32Array => {
     if (!spectrumRef.current || spectrumRef.current.length !== bins) {
       spectrumRef.current = new Float32Array(bins);
     }
@@ -133,7 +133,14 @@ export function useAudioAnalyser(
     }
 
     return out;
-  }
+  }, []);
 
-  return { getBands, getSpectrum, resume };
+  // Stable identity across renders — otherwise every VisualizerStage render
+  // (e.g. dragging the sensitivity slider) would hand consumers a brand-new
+  // `audio` object, which for the play/pause effect in VisualizerStage means
+  // spuriously re-firing `el.play()` on every unrelated re-render.
+  return useMemo(
+    () => ({ getBands, getSpectrum, resume }),
+    [getBands, getSpectrum, resume]
+  );
 }

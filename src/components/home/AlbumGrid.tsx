@@ -12,7 +12,10 @@ export default function AlbumGrid() {
   const status = useAppStore((s) => s.status);
   const isSearching = query.trim().length > 0;
 
-  if (status === "error") {
+  // Only replaces the grid with a blocking error when there's nothing else to
+  // show — a failed search shouldn't wipe out an already-loaded (if now
+  // stale) list of albums that's still perfectly valid to look at.
+  if (status === "error" && albums.length === 0) {
     return <p className="py-16 text-sm text-muted">Couldn&apos;t load albums — try again.</p>;
   }
 
@@ -37,7 +40,11 @@ export default function AlbumGrid() {
   return (
     <div className="py-10">
       <p className="mb-6 text-xs uppercase tracking-[0.25em] text-muted">
-        {isSearching ? `Results for "${query}"` : "Featured"}
+        {status === "error"
+          ? "Couldn't refresh — showing the last results."
+          : isSearching
+            ? `Results for "${query}"`
+            : "Featured"}
       </p>
       <div className="grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-4">
         {albums.map((album) => (
