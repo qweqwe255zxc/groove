@@ -36,6 +36,13 @@ type AppState = {
   isMenuOpen: boolean;
   introComplete: boolean;
 
+  // Set by playLocalTrack() when a picked file fails validation (too large,
+  // not audio) or by VisualizerStage's <audio onError> when a file that
+  // passed validation still can't actually be decoded (corrupt / codec the
+  // browser doesn't support) — UploadTrackButton surfaces whichever is set.
+  localTrackError: string | null;
+  setLocalTrackError: (error: string | null) => void;
+
   setQuery: (query: string) => void;
   setAlbums: (albums: Album[]) => void;
   setStatus: (status: AppState["status"]) => void;
@@ -51,6 +58,11 @@ type AppState = {
   // Landing paused with the Play button visible is honest about needing
   // that first click.
   openTrack: (track: Track) => void;
+  // Loads a user-picked audio file straight into the visualizer, bypassing
+  // the album/track flow entirely (no selectedAlbum, no iTunes lookup) —
+  // TrackMeta and the share/history effect in VisualizerStage both branch on
+  // `selectedAlbum` being null to treat this as a local track.
+  playLocalTrack: (file: File) => void;
   togglePlaying: (playing?: boolean) => void;
   closeVisualizer: () => void;
   setVisualizerMode: (mode: VisualizerMode) => void;
@@ -63,6 +75,17 @@ type AppState = {
   setMenuOpen: (open: boolean) => void;
   setIntroComplete: () => void;
 };
+
+// Object URL of the currently (or most recently) loaded local file, tracked
+// outside the store since it's cleanup bookkeeping rather than render state —
+// revoked whenever a new one is created so repeated uploads don't leak.
+let activeLocalObjectUrl: string | null = null;
+let localTrackIdCounter = -1;
+
+// Generous for a single track (a 10-minute FLAC is still well under this)
+// but enough to stop an accidental multi-hundred-MB pick (a video file, a
+// whole album folder zipped) from loading straight into memory as a blob.
+const MAX_LOCAL_FILE_BYTES = 100 * 1024 * 1024;
 
 export const useAppStore = create<AppState>((set) => ({
   query: "",
@@ -87,6 +110,9 @@ export const useAppStore = create<AppState>((set) => ({
   isMenuOpen: false,
   introComplete: false,
 
+  localTrackError: null,
+  setLocalTrackError: (localTrackError) => set({ localTrackError }),
+
   setQuery: (query) => set({ query }),
   setAlbums: (albums) => set({ albums }),
   setStatus: (status) => set({ status }),
@@ -95,9 +121,45 @@ export const useAppStore = create<AppState>((set) => ({
   setTracks: (tracks) => set({ tracks }),
   setPendingFlipState: (pendingFlipState) => set({ pendingFlipState }),
   playTrack: (track) =>
-    set({ activeTrack: track, isPlaying: true, isVisualizerOpen: true }),
+    set({ activeTrack: track, isPlaying: true, isVisualizerOpen: true, localTrackError: null }),
   openTrack: (track) =>
-    set({ activeTrack: track, isPlaying: false, isVisualizerOpen: true }),
+    set({ activeTrack: track, isPlaying: false, isVisualizerOpen: true, localTrackError: null }),
+  playLocalTrack: (file) => {
+    // Empty `type` isn't necessarily a bad file — Safari in particular
+    // leaves it blank for some containers (e.g. .flac) it can still decode
+    // just fine — so this only rejects a *confirmed* non-audio type, not an
+    // unknown one. A file that's still bad despite passing this (corrupt
+    // bytes, a codec the browser can't decode) gets caught later by the
+    // <audio onError> handler in VisualizerStage instead.
+    if (file.type && !file.type.startsWith("audio/")) {
+      set({ localTrackError: `"${file.name}" doesn't look like an audio file.` });
+      return;
+    }
+    if (file.size > MAX_LOCAL_FILE_BYTES) {
+      set({
+        localTrackError: `"${file.name}" is too large (max ${Math.floor(MAX_LOCAL_FILE_BYTES / (1024 * 1024))}MB).`,
+      });
+      return;
+    }
+
+    if (activeLocalObjectUrl) URL.revokeObjectURL(activeLocalObjectUrl);
+    const url = URL.createObjectURL(file);
+    activeLocalObjectUrl = url;
+    set({
+      selectedAlbum: null,
+      tracks: [],
+      activeTrack: {
+        trackId: localTrackIdCounter--,
+        trackName: file.name.replace(/\.[^/.]+$/, ""),
+        trackNumber: 0,
+        previewUrl: url,
+        durationMs: 0,
+      },
+      isPlaying: true,
+      isVisualizerOpen: true,
+      localTrackError: null,
+    });
+  },
   togglePlaying: (playing) =>
     set((state) => ({ isPlaying: playing ?? !state.isPlaying })),
   closeVisualizer: () =>

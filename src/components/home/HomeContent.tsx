@@ -1,5 +1,6 @@
 import SearchBar from "./SearchBar";
 import AlbumGrid from "./AlbumGrid";
+import UploadTrackButton from "./UploadTrackButton";
 import HashLink from "@/components/layout/HashLink";
 
 // Shared between "/" and the deep-link route (/v/[collectionId]/[trackId]) —
@@ -33,6 +34,12 @@ export default function HomeContent() {
 
       <section id="library" className="min-h-screen px-6 py-24 sm:px-10">
         <SearchBar />
+        <div className="mt-6 flex flex-wrap items-center gap-4">
+          <UploadTrackButton />
+          <p className="text-xs text-muted">
+            Or visualize an audio file from your own device.
+          </p>
+        </div>
         <AlbumGrid />
       </section>
 

@@ -7,7 +7,27 @@ export default function TrackMeta() {
   const activeTrack = useAppStore((s) => s.activeTrack);
   const selectedAlbum = useAppStore((s) => s.selectedAlbum);
 
-  if (!selectedAlbum) return null;
+  if (!selectedAlbum && !activeTrack) return null;
+
+  // A track loaded via playLocalTrack() has no selectedAlbum to describe it
+  // — nothing here comes from iTunes, just the filename.
+  if (!selectedAlbum) {
+    return (
+      <div className="pointer-events-none absolute left-6 top-24 flex max-w-xs flex-col gap-4 text-fg sm:left-10 sm:top-28">
+        <div>
+          <p className="text-[0.65rem] uppercase tracking-[0.25em] text-muted">
+            Now playing
+          </p>
+          <p className="font-display text-2xl italic leading-tight">
+            {activeTrack?.trackName}
+          </p>
+        </div>
+        <p className="border-t border-line pt-3 text-xs uppercase tracking-[0.2em] text-muted">
+          Local file
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="pointer-events-none absolute left-6 top-24 flex max-w-xs flex-col gap-4 text-fg sm:left-10 sm:top-28">

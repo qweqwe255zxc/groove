@@ -136,6 +136,7 @@ export default function VisualizerStage() {
   const setVisualizerMode = useAppStore((s) => s.setVisualizerMode);
   const togglePlaying = useAppStore((s) => s.togglePlaying);
   const closeVisualizer = useAppStore((s) => s.closeVisualizer);
+  const setLocalTrackError = useAppStore((s) => s.setLocalTrackError);
 
   const audio = useAudioAnalyser(audioRef, sensitivity);
   // "Resolved" rather than "system" — reflects ThemeToggle's manual override
@@ -597,6 +598,21 @@ export default function VisualizerStage() {
           anchorPlayback(dur);
           updateSeekDisplay(dur, dur);
           togglePlaying(false);
+        }}
+        onError={() => {
+          // playLocalTrack() already rejects an obviously-wrong file
+          // (wrong mime type, too large) before this element ever sees it —
+          // this catches what that can't: a file that looked fine but the
+          // browser still can't decode (corrupt bytes, an unsupported
+          // codec). Only local uploads hit this path — iTunes' preview URLs
+          // are stable, so a real error there would just be a dead link,
+          // not something to blame on the file and bounce the user for.
+          const { selectedAlbum, activeTrack: track } = useAppStore.getState();
+          if (selectedAlbum || !track) return;
+          setLocalTrackError(
+            `Couldn't play "${track.trackName}" — the file may be corrupt or in a format this browser can't decode.`
+          );
+          handleClose();
         }}
         hidden
       />
