@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { useAppStore } from "@/store/useAppStore";
-import AmbientToggle from "./AmbientToggle";
+import MusicToggle from "./MusicToggle";
 import HashLink from "./HashLink";
 import ThemeToggle from "./ThemeToggle";
 
@@ -155,7 +155,7 @@ export default function OverlayMenu() {
         </p>
         <div className="flex items-center gap-6">
           <ThemeToggle variant="menu" />
-          <AmbientToggle variant="menu" />
+          <MusicToggle variant="menu" />
           <LiveClock />
         </div>
       </div>

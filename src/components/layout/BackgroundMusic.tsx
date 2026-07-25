@@ -4,27 +4,44 @@ import { useEffect, useRef } from "react";
 import gsap from "gsap";
 import { useAppStore } from "@/store/useAppStore";
 
-// A looping ambient bed that plays everywhere in the app by default, so the
-// site never feels silent before a real track is playing — ducks out
+// A looping background bed that plays everywhere in the app by default, so
+// the site never feels silent before a real track is playing — ducks out
 // whenever the fullscreen visualizer is open (isVisualizerOpen) and fades
 // back in once it closes. Gated on isVisualizerOpen rather than isPlaying so
-// the visualizer stays an ambient-free zone even while paused inside it (a
+// the visualizer stays a music-free zone even while paused inside it (a
 // deep-link landing, or an explicit Pause mid-track) — the real track's own
-// audio is all that should be heard there. Same volume-tweening approach as
-// the real track's own fade in VisualizerStage. `ambientMuted` (toggled from
+// audio is all that should be heard there. `musicMuted` (toggled from
 // OverlayMenu) is a second, independent gate — either it or the visualizer
 // being open is enough to silence the bed.
-const AMBIENT_VOLUME = 0.25;
+const MUSIC_VOLUME = 0.25;
 const FADE_OUT_SECONDS = 1.2; // ducking for the visualizer — quick, out of the way
 const FADE_IN_SECONDS = 2.5; // returning after — slower, doesn't jump out
 
 // Same key-naming convention as ThemeEffect's STORAGE_KEY.
-const STORAGE_KEY = "groove-ambient-muted";
+const STORAGE_KEY = "groove-music-muted";
 
-export default function AmbientBackground() {
+// Fading `.volume` down to 0 alone doesn't guarantee silence — iOS Safari
+// ignores JS writes to it entirely (playback always follows the hardware
+// volume slider), which is exactly why the mute toggle used to look broken
+// on a phone: the bed kept playing at full volume no matter what state it
+// claimed to be in. Actually pausing the element once the fade-out
+// completes (and calling play() again on the way back in) is what makes
+// muting real everywhere, not just on platforms that happen to respect
+// `.volume`.
+function setSilenced(el: HTMLAudioElement, silenced: boolean, duration: number) {
+  gsap.killTweensOf(el);
+  if (silenced) {
+    gsap.to(el, { volume: 0, duration, ease: "sine.inOut", onComplete: () => el.pause() });
+  } else {
+    el.play().catch(() => {});
+    gsap.to(el, { volume: MUSIC_VOLUME, duration, ease: "sine.inOut" });
+  }
+}
+
+export default function BackgroundMusic() {
   const isVisualizerOpen = useAppStore((s) => s.isVisualizerOpen);
-  const ambientMuted = useAppStore((s) => s.ambientMuted);
-  const setAmbientMuted = useAppStore((s) => s.setAmbientMuted);
+  const musicMuted = useAppStore((s) => s.musicMuted);
+  const setMusicMuted = useAppStore((s) => s.setMusicMuted);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const unlockedRef = useRef(false);
 
@@ -33,21 +50,21 @@ export default function AmbientBackground() {
   // setState as the first statement in the effect body (gotcha 9). Runs
   // before the unlock effect below ever gets a real gesture to act on (that
   // needs a click/keydown/touchstart, which can't happen before mount), so
-  // by the time `tryUnlock` reads `state.ambientMuted` fresh from the store
+  // by the time `tryUnlock` reads `state.musicMuted` fresh from the store
   // the restored value is already there.
   useEffect(() => {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored === "true" || stored === "false") {
-      Promise.resolve().then(() => setAmbientMuted(stored === "true"));
+      Promise.resolve().then(() => setMusicMuted(stored === "true"));
     }
     // Restore once, on mount only — subsequent changes are the user acting
-    // through AmbientToggle, not something to re-read from storage.
+    // through MusicToggle, not something to re-read from storage.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, String(ambientMuted));
-  }, [ambientMuted]);
+    window.localStorage.setItem(STORAGE_KEY, String(musicMuted));
+  }, [musicMuted]);
 
   useEffect(() => {
     const el = audioRef.current;
@@ -84,9 +101,9 @@ export default function AmbientBackground() {
           unlockedRef.current = true;
           removeUnlockListeners();
           const state = useAppStore.getState();
-          const target =
-            state.isVisualizerOpen || state.ambientMuted ? 0 : AMBIENT_VOLUME;
-          gsap.to(el, { volume: target, duration: FADE_IN_SECONDS, ease: "sine.inOut" });
+          const silenced =
+            document.hidden || state.isVisualizerOpen || state.musicMuted;
+          setSilenced(el, silenced, FADE_IN_SECONDS);
         })
         .catch(() => {
           // Not enough activation yet — leave the other listeners in place
@@ -107,13 +124,37 @@ export default function AmbientBackground() {
 
   useEffect(() => {
     const el = audioRef.current;
-    if (!el || !unlockedRef.current) return;
-    gsap.killTweensOf(el);
-    const silenced = isVisualizerOpen || ambientMuted;
-    const target = silenced ? 0 : AMBIENT_VOLUME;
-    const duration = silenced ? FADE_OUT_SECONDS : FADE_IN_SECONDS;
-    gsap.to(el, { volume: target, duration, ease: "sine.inOut" });
-  }, [isVisualizerOpen, ambientMuted]);
+    if (!el || !unlockedRef.current || document.hidden) return;
+    const silenced = isVisualizerOpen || musicMuted;
+    setSilenced(el, silenced, silenced ? FADE_OUT_SECONDS : FADE_IN_SECONDS);
+  }, [isVisualizerOpen, musicMuted]);
+
+  // A phone locking, the browser backgrounding, or switching tabs doesn't
+  // pause the <audio> element on its own — without this it just keeps
+  // playing (and on iOS, inaudibly fighting the OS for the lock screen's
+  // now-playing controls) until the user comes back and notices. Cut
+  // instantly rather than tweening: the tab may be fully throttled by the
+  // time this fires, so a gsap tween has no guarantee of ever completing.
+  // Coming back only resumes if nothing else (mute, the visualizer) is
+  // still a reason to stay silent.
+  useEffect(() => {
+    function handleVisibilityChange() {
+      const el = audioRef.current;
+      if (!el || !unlockedRef.current) return;
+      if (document.hidden) {
+        gsap.killTweensOf(el);
+        el.volume = 0;
+        el.pause();
+        return;
+      }
+      const state = useAppStore.getState();
+      if (!state.isVisualizerOpen && !state.musicMuted) {
+        setSilenced(el, false, FADE_IN_SECONDS);
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
 
   return (
     <audio ref={audioRef} src="/audio/Ambiment.mp3" loop preload="none" hidden />

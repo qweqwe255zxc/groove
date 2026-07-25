@@ -473,6 +473,27 @@ export default function VisualizerStage() {
     togglePlaying();
   }, [togglePlaying]);
 
+  // A phone locking or the tab backgrounding doesn't pause playback on its
+  // own — without this the track (and its analyser-driven scene, uselessly
+  // rendering behind a black lock screen) just keeps going until the user
+  // comes back. Same micro-fade an explicit Pause gets, not the slower
+  // artistic one — this is unmistakably a mid-track interruption, not a
+  // deliberate end. Doesn't auto-resume on returning: unlike the ambient
+  // bed, an explicit Play is what re-establishes user activation here, and
+  // silently resuming whatever the user muted the phone for isn't obviously
+  // the right call anyway. (BackgroundMusic has its own separate handler for
+  // the ambient bed.)
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.hidden && useAppStore.getState().isPlaying) {
+        fastFadeRef.current = true;
+        togglePlaying(false);
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [togglePlaying]);
+
   // The actual seek: written to the element, restores the pre-emptive end
   // fade if the new position backs out of its window, and re-syncs the
   // display loop's baseline. Shared by handleSeek's non-drag branch (a click

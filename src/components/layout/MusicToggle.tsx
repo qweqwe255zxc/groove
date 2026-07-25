@@ -2,19 +2,19 @@
 
 import { useAppStore } from "@/store/useAppStore";
 
-// Mutes/unmutes AmbientBackground's looping bed — labeled with the currently
+// Mutes/unmutes BackgroundMusic's looping bed — labeled with the currently
 // active state (same convention as ThemeToggle and the Orb/Terrain button:
 // show what's on now, click flips it), so no separate icon-vs-label parsing
 // is needed to tell whether clicking turns it on or off.
-export default function AmbientToggle({
+export default function MusicToggle({
   variant = "pill",
   className = "",
 }: {
   variant?: "pill" | "menu";
   className?: string;
 }) {
-  const ambientMuted = useAppStore((s) => s.ambientMuted);
-  const toggleAmbientMuted = useAppStore((s) => s.toggleAmbientMuted);
+  const musicMuted = useAppStore((s) => s.musicMuted);
+  const toggleMusicMuted = useAppStore((s) => s.toggleMusicMuted);
 
   const base =
     variant === "pill"
@@ -24,12 +24,12 @@ export default function AmbientToggle({
   return (
     <button
       type="button"
-      onClick={toggleAmbientMuted}
-      aria-pressed={ambientMuted}
-      aria-label={ambientMuted ? "Unmute ambient sound" : "Mute ambient sound"}
+      onClick={toggleMusicMuted}
+      aria-pressed={musicMuted}
+      aria-label={musicMuted ? "Unmute background music" : "Mute background music"}
       className={`${base} ${className}`.trim()}
     >
-      Ambient: {ambientMuted ? "Off" : "On"}
+      Music: {musicMuted ? "Off" : "On"}
     </button>
   );
 }

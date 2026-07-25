@@ -6,7 +6,7 @@ import OverlayMenu from "@/components/layout/OverlayMenu";
 import ContentDimmer from "@/components/layout/ContentDimmer";
 import CustomCursor from "@/components/layout/CustomCursor";
 import ThemeEffect from "@/components/layout/ThemeEffect";
-import AmbientBackground from "@/components/layout/AmbientBackground";
+import BackgroundMusic from "@/components/layout/BackgroundMusic";
 import VisualizerStage from "@/components/visualizer/VisualizerStage";
 import VinylPanel from "@/components/album/VinylPanel";
 import IntroLoader from "@/components/intro/IntroLoader";
@@ -51,7 +51,7 @@ export default function RootLayout({
       <body className="min-h-full bg-bg text-fg antialiased selection:bg-accent">
         <SmoothScrollProvider>
           <ThemeEffect />
-          <AmbientBackground />
+          <BackgroundMusic />
           <IntroLoader />
           <SiteHeader />
           <OverlayMenu />
