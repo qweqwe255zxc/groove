@@ -34,7 +34,7 @@ function LiveClock() {
   // Rendered only after mount so the server-rendered markup never has to
   // guess the visitor's clock (and can't mismatch it on hydration).
   if (!time) return null;
-  return <span className="tabular-nums">{time}</span>;
+  return <span className="shrink-0 whitespace-nowrap tabular-nums">{time}</span>;
 }
 
 export default function OverlayMenu() {
@@ -153,9 +153,14 @@ export default function OverlayMenu() {
             Built by Bakushin
           </a>
         </p>
-        <div className="flex items-center gap-6">
-          <ThemeToggle variant="menu" />
-          <MusicToggle variant="menu" />
+        {/* flex-wrap + shrink-0/whitespace-nowrap on each pill: without
+            them, a narrow viewport squeezes these three below their content
+            width instead of wrapping them onto their own line, and their
+            uppercase tracked-out text (worst offender: "Background: On")
+            breaks mid-pill instead. */}
+        <div className="flex flex-wrap items-center gap-3 gap-y-2 sm:gap-6">
+          <ThemeToggle variant="menu" className="shrink-0 whitespace-nowrap" />
+          <MusicToggle variant="menu" className="shrink-0 whitespace-nowrap" />
           <LiveClock />
         </div>
       </div>

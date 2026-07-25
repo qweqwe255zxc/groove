@@ -5,7 +5,11 @@ import { useAppStore } from "@/store/useAppStore";
 // Mutes/unmutes BackgroundMusic's looping bed — labeled with the currently
 // active state (same convention as ThemeToggle and the Orb/Terrain button:
 // show what's on now, click flips it), so no separate icon-vs-label parsing
-// is needed to tell whether clicking turns it on or off.
+// is needed to tell whether clicking turns it on or off. Labeled
+// "Background", not "Music" — the visualizer plays real tracks too (see
+// TrackMeta's "Now playing"), and "Music: On/Off" sitting in the same menu
+// reads as a transport control for whatever's actually playing rather than
+// what it really is, the incidental bed underneath everything else.
 export default function MusicToggle({
   variant = "pill",
   className = "",
@@ -29,7 +33,7 @@ export default function MusicToggle({
       aria-label={musicMuted ? "Unmute background music" : "Mute background music"}
       className={`${base} ${className}`.trim()}
     >
-      Music: {musicMuted ? "Off" : "On"}
+      Background: {musicMuted ? "Off" : "On"}
     </button>
   );
 }
