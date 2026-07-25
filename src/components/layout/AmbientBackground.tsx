@@ -88,31 +88,44 @@ export default function AmbientBackground() {
 
     graphRef.current = { ctx, masterGain };
 
-    // Autoplay policy: the context comes up suspended (or the gain stays at
-    // 0 even if it doesn't) until a real user gesture. Whichever of these
-    // fires first resumes the context and reveals whatever the current
-    // isPlaying state says the target gain should be.
-    function unlock() {
-      if (unlockedRef.current) return;
-      unlockedRef.current = true;
-      window.removeEventListener("pointerdown", unlock);
-      window.removeEventListener("keydown", unlock);
-      window.removeEventListener("touchstart", unlock);
-      if (ctx.state === "suspended") ctx.resume();
-      const target = useAppStore.getState().isPlaying ? 0 : AMBIENT_GAIN;
-      const now = ctx.currentTime;
-      masterGain.gain.cancelScheduledValues(now);
-      masterGain.gain.setValueAtTime(masterGain.gain.value, now);
-      masterGain.gain.linearRampToValueAtTime(target, now + FADE_IN_SECONDS);
+    // Autoplay policy: the context comes up suspended until a real user
+    // gesture resumes it. Per the HTML spec's "activation triggering input
+    // events" list, pointerdown/keydown/touchstart reliably count and
+    // mousemove doesn't — so a mousemove-only resume() can silently fail
+    // (browser leaves the context suspended). Each event type gets exactly
+    // one attempt ({ once: true }): if mousemove's attempt doesn't actually
+    // land the context in "running", its listener is already gone but the
+    // guaranteed ones are untouched and still waiting, so a later real
+    // gesture still unlocks it — nothing is lost by trying mousemove first.
+    const unlockEvents = ["pointerdown", "keydown", "touchstart", "mousemove"] as const;
+    function removeUnlockListeners() {
+      for (const type of unlockEvents) window.removeEventListener(type, tryUnlock);
     }
-    window.addEventListener("pointerdown", unlock);
-    window.addEventListener("keydown", unlock);
-    window.addEventListener("touchstart", unlock);
+    function tryUnlock() {
+      if (unlockedRef.current) return;
+      ctx
+        .resume()
+        .then(() => {
+          if (unlockedRef.current || ctx.state !== "running") return;
+          unlockedRef.current = true;
+          removeUnlockListeners();
+          const target = useAppStore.getState().isPlaying ? 0 : AMBIENT_GAIN;
+          const now = ctx.currentTime;
+          masterGain.gain.cancelScheduledValues(now);
+          masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+          masterGain.gain.linearRampToValueAtTime(target, now + FADE_IN_SECONDS);
+        })
+        .catch(() => {
+          // Not a real gesture as far as the browser's concerned — leave
+          // the other listeners in place.
+        });
+    }
+    for (const type of unlockEvents) {
+      window.addEventListener(type, tryUnlock, { once: true });
+    }
 
     return () => {
-      window.removeEventListener("pointerdown", unlock);
-      window.removeEventListener("keydown", unlock);
-      window.removeEventListener("touchstart", unlock);
+      removeUnlockListeners();
       ctx.close();
       graphRef.current = null;
     };
