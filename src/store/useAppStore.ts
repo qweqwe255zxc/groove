@@ -162,8 +162,19 @@ export const useAppStore = create<AppState>((set) => ({
   },
   togglePlaying: (playing) =>
     set((state) => ({ isPlaying: playing ?? !state.isPlaying })),
+  // Closing is the only way out of a local track (there's no "resume"
+  // affordance for one, unlike an iTunes track's VinylPanel) — safe to
+  // revoke its object URL here rather than waiting for the next upload to
+  // do it, so a track left open in a background tab doesn't hold its blob
+  // in memory indefinitely.
   closeVisualizer: () =>
-    set({ isVisualizerOpen: false, isPlaying: false }),
+    set((state) => {
+      if (activeLocalObjectUrl && state.activeTrack?.previewUrl === activeLocalObjectUrl) {
+        URL.revokeObjectURL(activeLocalObjectUrl);
+        activeLocalObjectUrl = null;
+      }
+      return { isVisualizerOpen: false, isPlaying: false };
+    }),
   setVisualizerMode: (visualizerMode) => set({ visualizerMode }),
   setSensitivity: (sensitivity) => set({ sensitivity }),
   setColorScheme: (colorScheme) => set({ colorScheme }),
