@@ -100,6 +100,8 @@ export default function VisualizerStage() {
   const visualizerMode = useAppStore((s) => s.visualizerMode);
   const sensitivity = useAppStore((s) => s.sensitivity);
   const colorScheme = useAppStore((s) => s.colorScheme);
+  const volume = useAppStore((s) => s.volume);
+  const setVolume = useAppStore((s) => s.setVolume);
   const setVisualizerMode = useAppStore((s) => s.setVisualizerMode);
   const togglePlaying = useAppStore((s) => s.togglePlaying);
   const closeVisualizer = useAppStore((s) => s.closeVisualizer);
@@ -123,12 +125,39 @@ export default function VisualizerStage() {
   // paying for a full-screen postprocessing pass that provably never
   // contributes a pixel.
 
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
   useEffect(() => {
     const el = audioRef.current;
     if (!el || !activeTrack?.previewUrl) return;
     el.src = activeTrack.previewUrl;
     el.load();
+    setCurrentTime(0);
+    setDuration(0);
   }, [activeTrack?.previewUrl]);
+
+  // Drives the seek bar. A second, independent 'timeupdate' listener from
+  // the pre-emptive end-fade effect further below also exists — kept
+  // separate rather than merged into one handler since they serve unrelated
+  // concerns (UI progress display vs. fade timing) and neither needs to know
+  // about the other.
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    function handleTimeUpdate() {
+      if (el) setCurrentTime(el.currentTime);
+    }
+    function handleLoadedMetadata() {
+      if (el) setDuration(Number.isFinite(el.duration) ? el.duration : 0);
+    }
+    el.addEventListener("timeupdate", handleTimeUpdate);
+    el.addEventListener("loadedmetadata", handleLoadedMetadata);
+    return () => {
+      el.removeEventListener("timeupdate", handleTimeUpdate);
+      el.removeEventListener("loadedmetadata", handleLoadedMetadata);
+    };
+  }, []);
 
   // Keeps the address bar itself pointing at /v/[collectionId]/[trackId]
   // whenever a track is active, so the link is right there to copy without
@@ -188,7 +217,13 @@ export default function VisualizerStage() {
       el.play()
         .then(() => {
           if (cancelled) return;
-          gsap.to(el, { volume: 1, duration, ease: "sine.inOut" });
+          // Read fresh rather than closing over the `volume` from render —
+          // this effect doesn't depend on it (see handleVolumeChange below
+          // for why it can't), so a stale closure would fade in at whatever
+          // volume was set the moment this effect last ran instead of
+          // whatever the slider is at right now.
+          const target = useAppStore.getState().volume;
+          gsap.to(el, { volume: target, duration, ease: "sine.inOut" });
         })
         .catch(() => {
           if (!cancelled) togglePlaying(false);
@@ -238,6 +273,32 @@ export default function VisualizerStage() {
     fastFadeRef.current = true;
     togglePlaying();
   }, [togglePlaying]);
+
+  const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = Number(e.target.value);
+    const el = audioRef.current;
+    if (el) el.currentTime = value;
+    setCurrentTime(value);
+  }, []);
+
+  // Sets el.volume directly rather than through the store's `volume` value
+  // as a dependency — wiring the fade-in effect above to `volume` would
+  // re-run the whole play/pause effect (and restart the fade from 0) on
+  // every drag tick. Skipped entirely once the pre-emptive end fade has
+  // started (endFadeStartedRef) so dragging near a track's end doesn't kill
+  // that tween and leave it ending at an un-faded volume.
+  const handleVolumeChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = Number(e.target.value);
+      setVolume(value);
+      const el = audioRef.current;
+      if (el && isPlaying && !endFadeStartedRef.current) {
+        gsap.killTweensOf(el);
+        el.volume = value;
+      }
+    },
+    [isPlaying, setVolume]
+  );
 
   // Entrance fade — this used to just pop in instantly on the same frame
   // as the click, the only overlay in the app with no opening transition.
@@ -396,7 +457,50 @@ export default function VisualizerStage() {
             </button>
           </div>
 
-          <SettingsPanel theme={theme} />
+          <div className="absolute bottom-6 right-6 flex items-end gap-3 sm:bottom-10 sm:right-10">
+            <div className="flex h-9 items-center rounded-full border border-line px-4">
+              <input
+                type="range"
+                min={0}
+                max={duration || 0}
+                step={0.1}
+                value={currentTime}
+                onChange={handleSeek}
+                disabled={!duration}
+                aria-label="Seek"
+                className="w-28 cursor-pointer accent-accent disabled:cursor-not-allowed disabled:opacity-40 sm:w-36"
+              />
+            </div>
+
+            <SettingsPanel theme={theme} />
+
+            {/* Volume: a plain horizontal range input rotated -90deg (the
+                standard cross-browser trick for a vertical slider — Firefox's
+                `orient="vertical"` and WebKit's `-webkit-appearance:
+                slider-vertical` each only cover one engine, this covers all
+                of them with one rule) inside a fixed-size relative wrapper so
+                the post-rotation footprint (36 wide, 96 tall) reserves real
+                layout space instead of the input's own pre-rotation box. */}
+            <div className="relative h-24 w-9 shrink-0 rounded-full border border-line">
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={volume}
+                onChange={handleVolumeChange}
+                aria-label="Volume"
+                className="cursor-pointer accent-accent"
+                style={{
+                  width: 96,
+                  position: "absolute",
+                  top: "50%",
+                  left: "50%",
+                  transform: "translate(-50%, -50%) rotate(-90deg)",
+                }}
+              />
+            </div>
+          </div>
         </div>
       )}
     </>

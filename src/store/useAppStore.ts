@@ -28,6 +28,10 @@ type AppState = {
   colorScheme: ColorScheme;
   themePreference: ThemePreference;
   ambientMuted: boolean;
+  // The active track's own volume (0-1), set via VisualizerStage's volume
+  // slider — separate from the play/pause fade tweens, which animate el.volume
+  // toward this value rather than a hardcoded 1.
+  volume: number;
 
   isMenuOpen: boolean;
   introComplete: boolean;
@@ -54,6 +58,7 @@ type AppState = {
   setColorScheme: (scheme: ColorScheme) => void;
   setThemePreference: (preference: ThemePreference) => void;
   toggleAmbientMuted: () => void;
+  setVolume: (value: number) => void;
   setMenuOpen: (open: boolean) => void;
   setIntroComplete: () => void;
 };
@@ -76,6 +81,7 @@ export const useAppStore = create<AppState>((set) => ({
   colorScheme: "mono",
   themePreference: "system",
   ambientMuted: false,
+  volume: 1,
 
   isMenuOpen: false,
   introComplete: false,
@@ -100,6 +106,7 @@ export const useAppStore = create<AppState>((set) => ({
   setColorScheme: (colorScheme) => set({ colorScheme }),
   setThemePreference: (themePreference) => set({ themePreference }),
   toggleAmbientMuted: () => set((state) => ({ ambientMuted: !state.ambientMuted })),
+  setVolume: (volume) => set({ volume }),
   setMenuOpen: (isMenuOpen) => set({ isMenuOpen }),
   setIntroComplete: () => set({ introComplete: true }),
 }));

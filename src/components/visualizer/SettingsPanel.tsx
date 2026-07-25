@@ -46,10 +46,7 @@ export default function SettingsPanel({
   }, [open]);
 
   return (
-    <div
-      ref={containerRef}
-      className="absolute bottom-6 right-6 flex flex-col items-end gap-3 sm:bottom-10 sm:right-10"
-    >
+    <div ref={containerRef} className="flex flex-col items-end gap-3">
       {open && (
         <div className="w-64 rounded-2xl border border-line bg-surface/90 p-5 backdrop-blur-sm">
           <div className="mb-5">
