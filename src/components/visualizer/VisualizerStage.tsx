@@ -10,12 +10,12 @@ import { useAudioAnalyser } from "@/hooks/useAudioAnalyser";
 import { useGsapClose } from "@/hooks/useGsapClose";
 import { useResolvedTheme } from "@/hooks/useResolvedTheme";
 import { getParticleColors, getPalette } from "./palettes";
+import { PILL_BASE, PILL_BUTTON, PILL_ROW_ITEM } from "./controlStyles";
 import CanvasErrorBoundary from "./CanvasErrorBoundary";
 import OrbScene from "./scenes/OrbScene";
 import TerrainScene from "./scenes/TerrainScene";
 import SettingsPanel from "./SettingsPanel";
 import TrackMeta from "./TrackMeta";
-import VolumeSlider from "./VolumeSlider";
 import ThemeToggle from "@/components/layout/ThemeToggle";
 
 const BASE_CAMERA_POSITION: [number, number, number] = [0, 1.4, 6];
@@ -28,6 +28,16 @@ const FIT_RADIUS = 3.6;
 // just past `near`, fully faded to the background by `far`.
 const BASE_FOG_NEAR = 6;
 const BASE_FOG_FAR = 13;
+
+// Viewport width under which the scene gets the phone treatment described in
+// ResponsiveCamera: pulled back a little and dropped down the frame so it
+// stops sharing space with TrackMeta's text in the upper half. Matches
+// Tailwind's `sm`, which is where the overlay's own controls switch layout.
+const NARROW_VIEWPORT = 640;
+// Extra fit radius (i.e. how much empty margin to keep around the scene) and
+// how far down the frame to shift it, as a share of the visible frame height.
+const NARROW_FIT_MARGIN = 1.3;
+const NARROW_SCENE_DROP = 0.12;
 
 // Only ever used in dark theme — see the comment on `theme`/Bloom below for
 // why light theme skips the Bloom pass entirely instead of needing its own
@@ -100,8 +110,15 @@ function ResponsiveCamera() {
     const aspect = size.width / size.height;
     const vFov = THREE.MathUtils.degToRad(camera.fov);
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
-    const distanceForVertical = FIT_RADIUS / Math.tan(vFov / 2);
-    const distanceForHorizontal = FIT_RADIUS / Math.tan(hFov / 2);
+    // On a phone the overlay's own UI is stacked against the top of the
+    // frame (TrackMeta's cover + title + details list), so a scene centred
+    // in the viewport lands right on top of it while the space below the
+    // text goes unused. Asking for a larger radius to stay in frame pushes
+    // the camera back, shrinking the scene enough to stop competing.
+    const narrow = size.width < NARROW_VIEWPORT;
+    const fitRadius = FIT_RADIUS * (narrow ? NARROW_FIT_MARGIN : 1);
+    const distanceForVertical = fitRadius / Math.tan(vFov / 2);
+    const distanceForHorizontal = fitRadius / Math.tan(hFov / 2);
     const baseDistance = new THREE.Vector3(...BASE_CAMERA_POSITION).length();
     const distance = Math.max(baseDistance, distanceForVertical, distanceForHorizontal);
 
@@ -109,7 +126,16 @@ function ResponsiveCamera() {
       .set(...BASE_CAMERA_POSITION)
       .normalize()
       .multiplyScalar(distance);
-    camera.lookAt(0, 0, 0);
+    // Aiming above the origin drops the scene down the frame by the same
+    // amount, into that empty lower half. Clamped so the drop can never
+    // exceed the slack the fit calculation above actually left — on a
+    // narrow portrait viewport the horizontal fit dominates and there's
+    // plenty, but on a short landscape one there may be none at all.
+    const halfFrame = distance * Math.tan(vFov / 2);
+    const drop = narrow
+      ? Math.max(0, Math.min(halfFrame * 2 * NARROW_SCENE_DROP, halfFrame - fitRadius))
+      : 0;
+    camera.lookAt(0, drop, 0);
     camera.updateProjectionMatrix();
 
     // The scene's fog near/far are tuned for `baseDistance` — pushing the
@@ -753,7 +779,10 @@ export default function VisualizerStage() {
       {isVisualizerOpen && (
         <div
           ref={stageRef}
-          className="fixed inset-0 z-50 flex flex-col"
+          /* overflow-hidden because r3f rounds the canvas up to whole
+             device pixels, leaving it a few px wider than the viewport on a
+             fractional-DPR screen. */
+          className="fixed inset-0 z-50 flex flex-col overflow-hidden"
           style={{ background: palette.background }}
         >
           <CanvasErrorBoundary onReset={handleClose}>
@@ -790,13 +819,29 @@ export default function VisualizerStage() {
 
           <TrackMeta />
 
-          <div className="absolute right-6 top-6 flex items-center gap-3 sm:right-10 sm:top-10">
+          {/* Three widths, not two. Below 420px four tracked-out pills
+              can't share one line without the longest label ("Terrain",
+              "Copied") spilling past the edge, so they wrap 2×2 — still
+              spanning the full width, just over two rows. From 420px to sm
+              they fit one row and `flex-1` stretches them to actually fill
+              it (stopping just short read as a mis-measured row rather than
+              a deliberate inset). From sm: up they go back to a compact
+              group in the corner, where stretching would instead strand
+              them at opposite ends of a wide screen.
+
+              The `max-[420px]:order-*` below only bite while it's wrapped:
+              Share/Close take the top row there, since the two that leave
+              the visualizer belong above the two that just restyle it.
+              Source order stays the single-row reading order (Orb, Light,
+              Share, Close), which is what tab order follows and what every
+              width from 420px up actually renders. */}
+          <div className="absolute inset-x-4 top-4 flex flex-wrap items-center gap-2 min-[420px]:flex-nowrap sm:inset-x-auto sm:right-10 sm:top-10 sm:gap-3">
             <button
               type="button"
               onClick={() =>
                 setVisualizerMode(visualizerMode === "orb" ? "terrain" : "orb")
               }
-              className="rounded-full border border-line px-4 py-2 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg cursor-pointer"
+              className={`${PILL_ROW_ITEM} ${PILL_BUTTON} max-[420px]:order-3`}
             >
               {visualizerMode === "orb" ? "Orb" : "Terrain"}
             </button>
@@ -805,12 +850,15 @@ export default function VisualizerStage() {
                 the comment on that early-return in SiteHeader.tsx — so
                 there'd be no way to flip the theme without first closing the
                 visualizer if it weren't also reachable from here. */}
-            <ThemeToggle />
+            <ThemeToggle
+              variant="control"
+              className={`${PILL_ROW_ITEM} max-[420px]:order-4`}
+            />
             <button
               type="button"
               onClick={handleShare}
               disabled={!selectedAlbum || !activeTrack}
-              className="rounded-full border border-line px-4 py-2 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+              className={`${PILL_ROW_ITEM} ${PILL_BUTTON} disabled:cursor-not-allowed disabled:opacity-40 max-[420px]:order-1`}
             >
               {shareCopied ? "Copied" : "Share"}
             </button>
@@ -818,7 +866,7 @@ export default function VisualizerStage() {
               type="button"
               onClick={handleClose}
               aria-label="Close visualizer"
-              className="rounded-full border border-line px-4 py-2 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg cursor-pointer"
+              className={`${PILL_ROW_ITEM} ${PILL_BUTTON} max-[420px]:order-2`}
             >
               Close
             </button>
@@ -827,7 +875,7 @@ export default function VisualizerStage() {
           {/* Full-width seek bar — sits above the button row so opening
               SettingsPanel's dropdown (which grows upward from the button
               row below) doesn't fight it for space. */}
-          <div className="absolute bottom-20 left-6 right-6 sm:bottom-24 sm:left-10 sm:right-10">
+          <div className="absolute bottom-16 left-4 right-4 sm:bottom-24 sm:left-10 sm:right-10">
             {/* step="any" rather than a number: a native thumb snaps to its
                 step, so a 0.1s step on a 30s preview quantised the thumb to
                 ~4px hops while the CSS fill (a raw fraction) crawled on
@@ -852,14 +900,28 @@ export default function VisualizerStage() {
             />
           </div>
 
-          <div className="absolute bottom-6 left-6 flex items-center gap-3 sm:left-10 sm:bottom-10">
-            <button
-              type="button"
-              onClick={handleTogglePlaying}
-              className="rounded-full border border-line px-5 py-2 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg cursor-pointer"
-            >
-              {isPlaying ? "Pause" : "Play"}
-            </button>
+          {/* Play, elapsed/total, Settings — one row at every width, but
+              spaced two different ways. From sm: the ends are `flex-1
+              basis-0`, so they measure equal regardless of their own content
+              ("Pause" is wider than "Play", "Settings" wider than both) and
+              the readout sits on the real centre line rather than drifting
+              as the labels change. Below sm there isn't enough width left
+              over for that to look like anything but three unevenly-spaced
+              pills, so it falls back to `justify-between`, which splits the
+              slack evenly between neighbours instead. Volume moved inside
+              Settings: as a fourth item out here it was the one thing with
+              no room left below sm. */}
+          <div className="absolute inset-x-4 bottom-4 flex items-end justify-between gap-2 sm:inset-x-10 sm:bottom-10 sm:gap-3">
+            <div className="flex sm:flex-1 sm:basis-0 sm:justify-start">
+              <button
+                type="button"
+                onClick={handleTogglePlaying}
+                className={`${PILL_BUTTON} sm:px-5`}
+              >
+                {isPlaying ? "Pause" : "Play"}
+              </button>
+            </div>
+
             {/* Text content is intentionally static here — updateSeekDisplay
                 writes the live value straight to this node's textContent.
                 Rendering the same literal on every React re-render (rather
@@ -868,17 +930,24 @@ export default function VisualizerStage() {
                 overwritten for real when `duration` actually changes, at
                 which point resetting to 0 is correct anyway (see the
                 src-change effect above). */}
+            {/* tracking-normal below sm, unlike every other pill: this is
+                the widest thing in the row by some margin (13 characters),
+                and tabular figures already read as evenly spaced without
+                letter-spacing helping them. */}
             <div
               ref={timeDisplayRef}
-              className="rounded-full border border-line px-5 py-2 text-xs uppercase tracking-[0.2em] text-fg tabular-nums"
+              className={`${PILL_BASE} shrink-0 whitespace-nowrap tabular-nums tracking-normal sm:px-5 sm:tracking-[0.2em]`}
             >
               {formatTime(0)} / {formatTime(duration)}
             </div>
-          </div>
 
-          <div className="absolute bottom-6 right-6 flex items-end gap-3 sm:bottom-10 sm:right-10">
-            <VolumeSlider value={volume} onChange={handleVolumeChange} />
-            <SettingsPanel theme={theme} />
+            <div className="flex sm:flex-1 sm:basis-0 sm:justify-end">
+              <SettingsPanel
+                theme={theme}
+                volume={volume}
+                onVolumeChange={handleVolumeChange}
+              />
+            </div>
           </div>
         </div>
       )}

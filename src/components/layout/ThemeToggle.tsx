@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAppStore } from "@/store/useAppStore";
 import { useResolvedTheme } from "@/hooks/useResolvedTheme";
+import { PILL_BUTTON } from "@/components/visualizer/controlStyles";
 
 const LABEL: Record<"light" | "dark", string> = { light: "Light", dark: "Dark" };
 
@@ -13,7 +14,7 @@ export default function ThemeToggle({
   variant = "pill",
   className = "",
 }: {
-  variant?: "pill" | "menu";
+  variant?: "pill" | "menu" | "control";
   className?: string;
 }) {
   const resolvedTheme = useResolvedTheme();
@@ -40,10 +41,15 @@ export default function ThemeToggle({
   // overpowering the plain tagline/clock text next to it. Plain uppercase
   // text with no border read as inert here — indistinguishable from
   // LiveClock, which isn't interactive at all.
+  // "control": the visualizer overlay's own pill sizing, shared with the
+  // Orb/Share/Close buttons it sits between — kept in one place so the row
+  // can't end up with one button a different height or width from the rest.
   const base =
-    variant === "pill"
-      ? "rounded-full border border-line px-4 py-2 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg cursor-pointer"
-      : "rounded-full border border-line px-3 py-1.5 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg hover:text-accent cursor-pointer";
+    variant === "control"
+      ? PILL_BUTTON
+      : variant === "pill"
+        ? "rounded-full border border-line px-4 py-2 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg cursor-pointer"
+        : "rounded-full border border-line px-3 py-1.5 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg hover:text-accent cursor-pointer";
 
   return (
     <button

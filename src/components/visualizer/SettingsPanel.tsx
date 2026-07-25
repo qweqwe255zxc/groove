@@ -6,13 +6,80 @@ import { useAppStore, type ColorScheme } from "@/store/useAppStore";
 import type { SystemTheme } from "@/hooks/useSystemTheme";
 import { useGsapClose } from "@/hooks/useGsapClose";
 import { getParticleColors, getPalette } from "./palettes";
+import { PILL_BUTTON } from "./controlStyles";
 
 const SCHEMES: ColorScheme[] = ["mono", "clay", "sage", "neon"];
 
+/**
+ * One labelled, full-width row in this panel. Both sliders go through it so
+ * they can't drift apart: volume used to be a compact icon-plus-track pill
+ * sitting next to a full-width sensitivity track, which read as two
+ * unrelated controls that happened to share a panel.
+ *
+ * `.range-slider` (globals.css) rather than a native `accent-color` input,
+ * matching the seek bar — its --range-progress is a unitless 0–1 fraction of
+ * the way along the track, not a percentage, so each caller's own min/max
+ * has to be normalised into that here.
+ */
+function PanelSlider({
+  label,
+  readout,
+  min,
+  max,
+  value,
+  onChange,
+}: {
+  label: string;
+  readout: string;
+  min: number;
+  max: number;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div className="mb-5">
+      <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-muted">
+        <span>{label}</span>
+        <span className="tabular-nums">{readout}</span>
+      </div>
+      {/* step="any" for the same reason the seek bar uses it: a native thumb
+          snaps to its step, so sensitivity's old step of 0.1 gave the whole
+          0.5–2.5 range just 20 stops — about 11px apart on this track, which
+          under a dragging finger reads as the thumb stuttering rather than
+          following. Neither value needs quantising; the readouts round for
+          display on their own. */}
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step="any"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        aria-label={label}
+        aria-valuetext={readout}
+        className="range-slider"
+        style={
+          {
+            "--range-progress": String((value - min) / (max - min)),
+          } as React.CSSProperties
+        }
+      />
+    </div>
+  );
+}
+
 export default function SettingsPanel({
   theme,
+  volume,
+  onVolumeChange,
 }: {
   theme: SystemTheme;
+  // Passed down rather than read from the store: setting the store's
+  // `volume` alone doesn't move the audio element — VisualizerStage's
+  // handleVolumeChange writes `el.volume` directly too, for the reason
+  // documented on it there (the fade effect can't depend on `volume`).
+  volume: number;
+  onVolumeChange: (value: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -71,31 +138,35 @@ export default function SettingsPanel({
     <div ref={containerRef} className="relative">
       {/* Absolutely positioned rather than a flex sibling of the toggle
           button below: as a normal-flow sibling, this panel's own width
-          (256px open vs. 0 closed) changed the width of the row it sits in
-          (VisualizerStage's bottom-right control row, alongside
-          VolumeSlider) — that row is right-anchored, so growing it pushed
-          VolumeSlider left every time this opened. Taking it out of flow
-          entirely means opening/closing this never resizes anything else. */}
+          (256px open vs. 0 closed) changed the width of the row it sits in,
+          shoving its neighbours sideways every time it opened. Taking it out
+          of flow entirely means opening/closing this never resizes
+          anything else. */}
       {open && (
         <div
           ref={panelRef}
-          className="absolute bottom-full right-0 mb-3 w-64 origin-bottom-right rounded-2xl border border-line bg-surface/90 p-5 backdrop-blur-sm"
+          /* min() rather than a flat w-64: the panel is right-anchored to a
+             button that already sits at the viewport edge, so on a 320px
+             screen a fixed 16rem would have nowhere left to go. */
+          className="absolute bottom-full right-0 mb-3 w-[min(16rem,calc(100vw-2rem))] origin-bottom-right rounded-2xl border border-line bg-surface/90 p-5 backdrop-blur-sm"
         >
-          <div className="mb-5">
-            <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-muted">
-              <span>Bass sensitivity</span>
-              <span>{sensitivity.toFixed(1)}×</span>
-            </div>
-            <input
-              type="range"
-              min={0.5}
-              max={2.5}
-              step={0.1}
-              value={sensitivity}
-              onChange={(e) => setSensitivity(Number(e.target.value))}
-              className="w-full accent-accent"
-            />
-          </div>
+          <PanelSlider
+            label="Volume"
+            readout={`${Math.round(volume * 100)}%`}
+            min={0}
+            max={1}
+            value={volume}
+            onChange={onVolumeChange}
+          />
+
+          <PanelSlider
+            label="Bass sensitivity"
+            readout={`${sensitivity.toFixed(1)}×`}
+            min={0.5}
+            max={2.5}
+            value={sensitivity}
+            onChange={setSensitivity}
+          />
 
           <div>
             <div className="mb-2 text-xs uppercase tracking-[0.2em] text-muted">
@@ -139,7 +210,7 @@ export default function SettingsPanel({
       <button
         type="button"
         onClick={() => (open ? handleClose() : setOpen(true))}
-        className="rounded-full border border-line px-4 py-2 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg cursor-pointer"
+        className={PILL_BUTTON}
         aria-expanded={open}
       >
         Settings
