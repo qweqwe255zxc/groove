@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Groove — audio-reactive album visualizer
 
-## Getting Started
+Search iTunes for an album, expand its cover into a spinning vinyl, hit play,
+and a fullscreen Three.js scene reacts to the track's frequencies in real
+time.
 
-First, run the development server:
+Built with Next.js 16 (App Router, TypeScript), Tailwind v4,
+[react-three-fiber](https://github.com/pmndrs/react-three-fiber) / three.js,
+GSAP, Lenis, and Zustand.
+
+## Getting started
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000). No API keys or
+environment variables are required — the iTunes Search API is public and
+keyless, and all requests to it are proxied through this app's own API
+routes (see below).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `npm run dev` — start the dev server
+- `npm run build` — production build
+- `npm run start` — serve the production build
+- `npm run lint` — run ESLint
 
-## Learn More
+## How it works
 
-To learn more about Next.js, take a look at the following resources:
+1. `SearchBar`/`AlbumGrid` query `/api/albums`, which calls the iTunes Search
+   API server-side (iTunes' response has no CORS headers, so it can't be
+   fetched from the browser) and normalizes the results.
+2. Clicking an album cover morphs it (via GSAP Flip) into `VinylPanel`, a
+   spinning-vinyl detail view that fetches the album's tracks from
+   `/api/albums/[collectionId]/tracks`.
+3. Hitting Play opens `VisualizerStage`: a Web Audio `AnalyserNode` reads the
+   `<audio>` element's frequency data every frame, and an r3f `<Canvas>`
+   scene (`OrbScene` or `TerrainScene`) displaces a point cloud in response —
+   bass drives distortion/scale, treble drives color.
+4. Visitors can also drop in their own audio file instead of an iTunes
+   preview, via the upload control in `VisualizerStage`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+For the non-obvious constraints behind these choices — why the audio element
+never unmounts, why frequency data is read from refs instead of React state,
+why `Flip.from()` needs an explicit `targets`, and so on — see
+[`CLAUDE.md`](./CLAUDE.md).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Project structure
 
-## Deploy on Vercel
+- `src/lib/itunes.ts` — iTunes fetch + normalization (server-side only)
+- `src/store/useAppStore.ts` — global Zustand store (search, playback,
+  visualizer mode/sensitivity/color scheme)
+- `src/hooks/` — `useAudioAnalyser` (Web Audio wiring), `useAlbumSearch`,
+  `useGsapClose` (shared "animate out, then unmount" pattern), theme/system
+  hooks
+- `src/components/layout/` — smooth scroll, header, fullscreen nav, page
+  dimmer, custom cursor
+- `src/components/home/` — search bar and album grid
+- `src/components/album/` — `VinylPanel`, the cover-to-vinyl detail view
+- `src/components/visualizer/` — `VisualizerStage` (canvas host + controls),
+  `scenes/` (`OrbScene`, `TerrainScene`), settings and track-meta UI
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Deployment
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Any Next.js host works (e.g. [Vercel](https://vercel.com/new)). No secrets
+to configure — just `npm run build` and serve.
