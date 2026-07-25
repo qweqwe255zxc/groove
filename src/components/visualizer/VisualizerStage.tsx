@@ -37,7 +37,7 @@ const DARK_BLOOM_TUNING = { luminanceThreshold: 0.1, luminanceSmoothing: 0.95, i
 // A track genuinely starting (fresh load from VinylPanel's Play button) or
 // genuinely ending (onEnded, closeVisualizer) gets this — long enough to
 // read as a deliberate artistic fade, not just anti-click smoothing.
-const FADE_DURATION = 2;
+const FADE_DURATION = 1.5;
 // An explicit Pause/Resume mid-track (button or Spacebar — see fastFadeRef
 // below) gets this instead — quicker than the artistic fade so the two feel
 // distinct, but still slow enough to read as a deliberate fade rather than a
@@ -157,6 +157,13 @@ export default function VisualizerStage() {
   // track genuinely starting or ending rather than a mid-track pause/resume
   // — those keep the slower, deliberately-audible artistic fade.
   const fastFadeRef = useRef(false);
+  // By the time the browser's own 'ended' event fires, playback has already
+  // stopped — the element isn't emitting any samples anymore, so a fade-out
+  // tween started there is fading against silence and never actually reads
+  // as a fade. This flag tracks whether the pre-emptive end-of-track fade
+  // below has already been kicked off for the *current* playthrough, so it
+  // only fires once per track and gets a clean slate on every fresh start.
+  const endFadeStartedRef = useRef(false);
 
   useEffect(() => {
     const el = audioRef.current;
@@ -175,6 +182,7 @@ export default function VisualizerStage() {
     // above can't help — it runs before this promise settles, not after).
     let cancelled = false;
     if (isPlaying) {
+      endFadeStartedRef.current = false;
       audio.resume();
       el.volume = 0;
       el.play()
@@ -202,6 +210,25 @@ export default function VisualizerStage() {
       cancelled = true;
     };
   }, [isPlaying, activeTrack?.previewUrl, audio, togglePlaying]);
+
+  // Starts the artistic end fade FADE_DURATION seconds early, timed against
+  // actual playback position (not a setTimeout) so it lands at 0 right as
+  // the track really ends, however long the preview turns out to be.
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    function handleTimeUpdate() {
+      if (endFadeStartedRef.current || !el || !Number.isFinite(el.duration)) return;
+      const remaining = el.duration - el.currentTime;
+      if (remaining <= FADE_DURATION) {
+        endFadeStartedRef.current = true;
+        gsap.killTweensOf(el);
+        gsap.to(el, { volume: 0, duration: Math.max(remaining, 0), ease: "sine.inOut" });
+      }
+    }
+    el.addEventListener("timeupdate", handleTimeUpdate);
+    return () => el.removeEventListener("timeupdate", handleTimeUpdate);
+  }, []);
 
   // Wraps togglePlaying() for the explicit play/pause entry points (button,
   // Spacebar) so the fade above can tell "user toggled mid-track playback"
