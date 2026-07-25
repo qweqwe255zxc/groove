@@ -142,11 +142,23 @@ export default function VisualizerStage() {
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
+    // Kill any fade already in flight — rapid play/pause toggling (or a
+    // track switch mid-fade) would otherwise leave two tweens fighting over
+    // `el.volume`.
+    gsap.killTweensOf(el);
     if (isPlaying) {
       audio.resume();
-      el.play().catch(() => togglePlaying(false));
+      el.volume = 0;
+      el.play()
+        .then(() => gsap.to(el, { volume: 1, duration: 1, ease: "sine.inOut" }))
+        .catch(() => togglePlaying(false));
     } else {
-      el.pause();
+      gsap.to(el, {
+        volume: 0,
+        duration: 1,
+        ease: "sine.inOut",
+        onComplete: () => el.pause(),
+      });
     }
     // `activeTrack?.previewUrl` is also a dependency, not just `isPlaying` —
     // without it, switching to a new track while already playing (isPlaying
