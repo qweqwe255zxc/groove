@@ -34,13 +34,17 @@ const BASE_FOG_FAR = 13;
 // needed to grab more of them and spread what it grabs further.
 const DARK_BLOOM_TUNING = { luminanceThreshold: 0.1, luminanceSmoothing: 0.95, intensity: 1.9 };
 
-// Play always fades in over this long, and pause fades out over this long
-// too by default (onEnded, closeVisualizer) — a symmetric "settling in/out"
-// feel. An explicit Pause click/Spacebar gets the shorter PAUSE_FADE_DURATION
-// instead (see fastPauseRef below), so hitting pause reads as responsive
-// rather than matching the same leisurely fade playback started with.
-const FADE_DURATION = 1;
-const PAUSE_FADE_DURATION = 0.35;
+// A track genuinely starting (fresh load from VinylPanel's Play button) or
+// genuinely ending (onEnded, closeVisualizer) gets this — long enough to
+// read as a deliberate artistic fade, not just anti-click smoothing.
+const FADE_DURATION = 1.5;
+// An explicit Pause/Resume mid-track (button or Spacebar — see fastFadeRef
+// below) gets this instead: short enough that it's inaudible as a "fade" in
+// its own right, just long enough to land the volume change across a few
+// sample frames instead of one discontinuous jump — which is what actually
+// causes the audible click/pop (a waveform cut off somewhere other than a
+// zero-crossing), not the pause/resume itself.
+const MICRO_FADE_DURATION = 0.05;
 
 // A fixed vertical `fov` plus a fixed camera distance only fits the scene at
 // the aspect ratio it was tuned for (desktop, ~16:9). Three.js/R3F derive the
@@ -147,14 +151,14 @@ export default function VisualizerStage() {
     }
   }, [selectedAlbum, activeTrack]);
 
-  // Set right before an explicit Play/Pause click or Spacebar toggles from
-  // playing to paused (see handleTogglePlaying below) — consumed once by the
-  // effect below, so a fast fade only ever applies to that one transition.
-  // Left false for onEnded and closeVisualizer, which both also flip
-  // isPlaying to false but read as "this session of listening is over"
-  // rather than "pause" — those keep the slower symmetric fade that matches
-  // how playback started.
-  const fastPauseRef = useRef(false);
+  // Set right before an explicit Play/Pause click or Spacebar toggles
+  // playback in *either* direction (see handleTogglePlaying below) —
+  // consumed once by the effect below, so the micro-fade only ever applies
+  // to that one transition. Left false for VinylPanel's own Play button,
+  // onEnded, and closeVisualizer, which also flip isPlaying but represent a
+  // track genuinely starting or ending rather than a mid-track pause/resume
+  // — those keep the slower, deliberately-audible artistic fade.
+  const fastFadeRef = useRef(false);
 
   useEffect(() => {
     const el = audioRef.current;
@@ -163,6 +167,8 @@ export default function VisualizerStage() {
     // track switch mid-fade) would otherwise leave two tweens fighting over
     // `el.volume`.
     gsap.killTweensOf(el);
+    const duration = fastFadeRef.current ? MICRO_FADE_DURATION : FADE_DURATION;
+    fastFadeRef.current = false;
     // el.play() is async (it can be waiting on buffering) — if isPlaying
     // flips back to false before it resolves, this effect has already
     // re-run for the pause and started the fade-to-0 tween by the time the
@@ -176,14 +182,12 @@ export default function VisualizerStage() {
       el.play()
         .then(() => {
           if (cancelled) return;
-          gsap.to(el, { volume: 1, duration: FADE_DURATION, ease: "sine.inOut" });
+          gsap.to(el, { volume: 1, duration, ease: "sine.inOut" });
         })
         .catch(() => {
           if (!cancelled) togglePlaying(false);
         });
     } else {
-      const duration = fastPauseRef.current ? PAUSE_FADE_DURATION : FADE_DURATION;
-      fastPauseRef.current = false;
       gsap.to(el, {
         volume: 0,
         duration,
@@ -201,13 +205,14 @@ export default function VisualizerStage() {
     };
   }, [isPlaying, activeTrack?.previewUrl, audio, togglePlaying]);
 
-  // Wraps togglePlaying() for the two explicit-pause entry points (button,
-  // Spacebar) so the fade above can tell "user hit pause" apart from
-  // onEnded/closeVisualizer also flipping isPlaying to false.
+  // Wraps togglePlaying() for the explicit play/pause entry points (button,
+  // Spacebar) so the fade above can tell "user toggled mid-track playback"
+  // (either direction) apart from VinylPanel's Play button starting a track
+  // fresh, or onEnded/closeVisualizer ending one.
   const handleTogglePlaying = useCallback(() => {
-    if (isPlaying) fastPauseRef.current = true;
+    fastFadeRef.current = true;
     togglePlaying();
-  }, [isPlaying, togglePlaying]);
+  }, [togglePlaying]);
 
   // Entrance fade — this used to just pop in instantly on the same frame
   // as the click, the only overlay in the app with no opening transition.
