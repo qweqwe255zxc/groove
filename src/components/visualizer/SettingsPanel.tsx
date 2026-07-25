@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import gsap from "gsap";
 import { useAppStore, type ColorScheme } from "@/store/useAppStore";
 import type { SystemTheme } from "@/hooks/useSystemTheme";
 import { getParticleColors, getPalette } from "./palettes";
@@ -14,10 +15,31 @@ export default function SettingsPanel({
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const sensitivity = useAppStore((s) => s.sensitivity);
   const setSensitivity = useAppStore((s) => s.setSensitivity);
   const colorScheme = useAppStore((s) => s.colorScheme);
   const setColorScheme = useAppStore((s) => s.setColorScheme);
+
+  // Mirrors VisualizerStage's handleClose: animate the panel out first,
+  // only flip `open` (which actually unmounts it) once the tween finishes —
+  // an instant unmount on outside-click/Escape/toggle would skip the close
+  // animation entirely.
+  const handleClose = useCallback(() => {
+    const panel = panelRef.current;
+    if (!panel) {
+      setOpen(false);
+      return;
+    }
+    gsap.to(panel, {
+      autoAlpha: 0,
+      y: 8,
+      scale: 0.96,
+      duration: 0.18,
+      ease: "power2.in",
+      onComplete: () => setOpen(false),
+    });
+  }, []);
 
   // Dropdown-style panel: clicking anywhere outside it (not just the
   // toggle button) should close it, same expectation as VinylPanel's
@@ -25,13 +47,13 @@ export default function SettingsPanel({
   useEffect(() => {
     if (!open) return;
     function handlePointerDown(e: PointerEvent) {
-      if (!containerRef.current?.contains(e.target as Node)) setOpen(false);
+      if (!containerRef.current?.contains(e.target as Node)) handleClose();
     }
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        setOpen(false);
+        handleClose();
       }
     }
     document.addEventListener("pointerdown", handlePointerDown);
@@ -43,12 +65,35 @@ export default function SettingsPanel({
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown, true);
     };
+  }, [open, handleClose]);
+
+  // Entrance animation — grows out of the toggle button rather than
+  // popping in instantly.
+  useEffect(() => {
+    if (!open) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    gsap.fromTo(
+      panel,
+      { autoAlpha: 0, y: 8, scale: 0.96 },
+      { autoAlpha: 1, y: 0, scale: 1, duration: 0.22, ease: "power3.out" }
+    );
   }, [open]);
 
   return (
-    <div ref={containerRef} className="flex flex-col items-end gap-3">
+    <div ref={containerRef} className="relative">
+      {/* Absolutely positioned rather than a flex sibling of the toggle
+          button below: as a normal-flow sibling, this panel's own width
+          (256px open vs. 0 closed) changed the width of the row it sits in
+          (VisualizerStage's bottom-right control row, alongside
+          VolumeSlider) — that row is right-anchored, so growing it pushed
+          VolumeSlider left every time this opened. Taking it out of flow
+          entirely means opening/closing this never resizes anything else. */}
       {open && (
-        <div className="w-64 rounded-2xl border border-line bg-surface/90 p-5 backdrop-blur-sm">
+        <div
+          ref={panelRef}
+          className="absolute bottom-full right-0 mb-3 w-64 origin-bottom-right rounded-2xl border border-line bg-surface/90 p-5 backdrop-blur-sm"
+        >
           <div className="mb-5">
             <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-muted">
               <span>Bass sensitivity</span>
@@ -106,7 +151,7 @@ export default function SettingsPanel({
 
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => (open ? handleClose() : setOpen(true))}
         className="rounded-full border border-line px-4 py-2 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg cursor-pointer"
         aria-expanded={open}
       >
