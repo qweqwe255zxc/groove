@@ -18,11 +18,36 @@ const AMBIENT_VOLUME = 0.25;
 const FADE_OUT_SECONDS = 1.2; // ducking for the visualizer — quick, out of the way
 const FADE_IN_SECONDS = 2.5; // returning after — slower, doesn't jump out
 
+// Same key-naming convention as ThemeEffect's STORAGE_KEY.
+const STORAGE_KEY = "groove-ambient-muted";
+
 export default function AmbientBackground() {
   const isVisualizerOpen = useAppStore((s) => s.isVisualizerOpen);
   const ambientMuted = useAppStore((s) => s.ambientMuted);
+  const setAmbientMuted = useAppStore((s) => s.setAmbientMuted);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const unlockedRef = useRef(false);
+
+  // Restores a saved mute choice on first load, mirroring ThemeEffect's
+  // restore effect — deferred to a microtask rather than a synchronous
+  // setState as the first statement in the effect body (gotcha 9). Runs
+  // before the unlock effect below ever gets a real gesture to act on (that
+  // needs a click/keydown/touchstart, which can't happen before mount), so
+  // by the time `tryUnlock` reads `state.ambientMuted` fresh from the store
+  // the restored value is already there.
+  useEffect(() => {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (stored === "true" || stored === "false") {
+      Promise.resolve().then(() => setAmbientMuted(stored === "true"));
+    }
+    // Restore once, on mount only — subsequent changes are the user acting
+    // through AmbientToggle, not something to re-read from storage.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY, String(ambientMuted));
+  }, [ambientMuted]);
 
   useEffect(() => {
     const el = audioRef.current;

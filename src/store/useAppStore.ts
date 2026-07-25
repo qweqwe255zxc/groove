@@ -58,6 +58,7 @@ type AppState = {
   setColorScheme: (scheme: ColorScheme) => void;
   setThemePreference: (preference: ThemePreference) => void;
   toggleAmbientMuted: () => void;
+  setAmbientMuted: (muted: boolean) => void;
   setVolume: (value: number) => void;
   setMenuOpen: (open: boolean) => void;
   setIntroComplete: () => void;
@@ -106,6 +107,7 @@ export const useAppStore = create<AppState>((set) => ({
   setColorScheme: (colorScheme) => set({ colorScheme }),
   setThemePreference: (themePreference) => set({ themePreference }),
   toggleAmbientMuted: () => set((state) => ({ ambientMuted: !state.ambientMuted })),
+  setAmbientMuted: (ambientMuted) => set({ ambientMuted }),
   setVolume: (volume) => set({ volume }),
   setMenuOpen: (isMenuOpen) => set({ isMenuOpen }),
   setIntroComplete: () => set({ introComplete: true }),
