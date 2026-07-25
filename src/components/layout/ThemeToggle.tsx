@@ -34,10 +34,16 @@ export default function ThemeToggle({
 
   if (!mounted) return null;
 
+  // "menu": a smaller pill than the default — same bordered-chip language as
+  // the rest of the site's buttons (SettingsPanel, the Orb/Terrain switch),
+  // just scaled to sit inline in OverlayMenu's footer row without
+  // overpowering the plain tagline/clock text next to it. Plain uppercase
+  // text with no border read as inert here — indistinguishable from
+  // LiveClock, which isn't interactive at all.
   const base =
     variant === "pill"
       ? "rounded-full border border-line px-4 py-2 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg cursor-pointer"
-      : "text-xs uppercase tracking-[0.2em] text-muted transition-colors hover:text-fg cursor-pointer";
+      : "rounded-full border border-line px-3 py-1.5 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg hover:text-accent cursor-pointer";
 
   return (
     <button

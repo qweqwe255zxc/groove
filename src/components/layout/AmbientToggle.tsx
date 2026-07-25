@@ -19,7 +19,7 @@ export default function AmbientToggle({
   const base =
     variant === "pill"
       ? "rounded-full border border-line px-4 py-2 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg cursor-pointer"
-      : "text-xs uppercase tracking-[0.2em] text-muted transition-colors hover:text-fg cursor-pointer";
+      : "rounded-full border border-line px-3 py-1.5 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg hover:text-accent cursor-pointer";
 
   return (
     <button
