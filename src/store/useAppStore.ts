@@ -27,6 +27,7 @@ type AppState = {
   sensitivity: number;
   colorScheme: ColorScheme;
   themePreference: ThemePreference;
+  ambientMuted: boolean;
 
   isMenuOpen: boolean;
   introComplete: boolean;
@@ -52,6 +53,7 @@ type AppState = {
   setSensitivity: (value: number) => void;
   setColorScheme: (scheme: ColorScheme) => void;
   setThemePreference: (preference: ThemePreference) => void;
+  toggleAmbientMuted: () => void;
   setMenuOpen: (open: boolean) => void;
   setIntroComplete: () => void;
 };
@@ -73,6 +75,7 @@ export const useAppStore = create<AppState>((set) => ({
   sensitivity: 1,
   colorScheme: "mono",
   themePreference: "system",
+  ambientMuted: false,
 
   isMenuOpen: false,
   introComplete: false,
@@ -96,6 +99,7 @@ export const useAppStore = create<AppState>((set) => ({
   setSensitivity: (sensitivity) => set({ sensitivity }),
   setColorScheme: (colorScheme) => set({ colorScheme }),
   setThemePreference: (themePreference) => set({ themePreference }),
+  toggleAmbientMuted: () => set((state) => ({ ambientMuted: !state.ambientMuted })),
   setMenuOpen: (isMenuOpen) => set({ isMenuOpen }),
   setIntroComplete: () => set({ introComplete: true }),
 }));

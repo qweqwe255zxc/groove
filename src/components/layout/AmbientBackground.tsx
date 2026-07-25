@@ -11,13 +11,16 @@ import { useAppStore } from "@/store/useAppStore";
 // the visualizer stays an ambient-free zone even while paused inside it (a
 // deep-link landing, or an explicit Pause mid-track) — the real track's own
 // audio is all that should be heard there. Same volume-tweening approach as
-// the real track's own fade in VisualizerStage.
+// the real track's own fade in VisualizerStage. `ambientMuted` (toggled from
+// OverlayMenu) is a second, independent gate — either it or the visualizer
+// being open is enough to silence the bed.
 const AMBIENT_VOLUME = 0.25;
 const FADE_OUT_SECONDS = 1.2; // ducking for the visualizer — quick, out of the way
 const FADE_IN_SECONDS = 2.5; // returning after — slower, doesn't jump out
 
 export default function AmbientBackground() {
   const isVisualizerOpen = useAppStore((s) => s.isVisualizerOpen);
+  const ambientMuted = useAppStore((s) => s.ambientMuted);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const unlockedRef = useRef(false);
 
@@ -45,7 +48,9 @@ export default function AmbientBackground() {
           if (unlockedRef.current) return;
           unlockedRef.current = true;
           removeUnlockListeners();
-          const target = useAppStore.getState().isVisualizerOpen ? 0 : AMBIENT_VOLUME;
+          const state = useAppStore.getState();
+          const target =
+            state.isVisualizerOpen || state.ambientMuted ? 0 : AMBIENT_VOLUME;
           gsap.to(el, { volume: target, duration: FADE_IN_SECONDS, ease: "sine.inOut" });
         })
         .catch(() => {
@@ -67,10 +72,11 @@ export default function AmbientBackground() {
     const el = audioRef.current;
     if (!el || !unlockedRef.current) return;
     gsap.killTweensOf(el);
-    const target = isVisualizerOpen ? 0 : AMBIENT_VOLUME;
-    const duration = isVisualizerOpen ? FADE_OUT_SECONDS : FADE_IN_SECONDS;
+    const silenced = isVisualizerOpen || ambientMuted;
+    const target = silenced ? 0 : AMBIENT_VOLUME;
+    const duration = silenced ? FADE_OUT_SECONDS : FADE_IN_SECONDS;
     gsap.to(el, { volume: target, duration, ease: "sine.inOut" });
-  }, [isVisualizerOpen]);
+  }, [isVisualizerOpen, ambientMuted]);
 
   return (
     <audio ref={audioRef} src="/audio/Ambiment.mp3" loop preload="none" hidden />

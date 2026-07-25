@@ -3,7 +3,6 @@
 import { useAppStore } from "@/store/useAppStore";
 import GrooveMark from "./GrooveMark";
 import HashLink from "./HashLink";
-import ThemeToggle from "./ThemeToggle";
 
 export default function SiteHeader() {
   const isMenuOpen = useAppStore((s) => s.isMenuOpen);
@@ -34,7 +33,6 @@ export default function SiteHeader() {
       </HashLink>
 
       <div className="flex items-center gap-5">
-        <ThemeToggle variant="header" />
         <button
           type="button"
           onClick={() => setMenuOpen(!isMenuOpen)}
