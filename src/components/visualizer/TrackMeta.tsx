@@ -3,6 +3,15 @@
 import Image from "next/image";
 import { useAppStore } from "@/store/useAppStore";
 
+// Shared by both branches below (local file vs. a real iTunes album) so the
+// block can't drift out of alignment between them. top-28 rather than
+// top-24: below 420px the overlay's control row wraps to two rows of pills
+// (see VisualizerStage), and the old offset sat under only the first of
+// them. `right-4` caps the width — max-w-xs alone is wider than a 320px
+// viewport.
+const META_POSITION =
+  "pointer-events-none absolute left-4 right-4 top-28 flex max-w-xs flex-col gap-4 text-fg sm:left-10 sm:right-auto sm:top-28";
+
 export default function TrackMeta() {
   const activeTrack = useAppStore((s) => s.activeTrack);
   const selectedAlbum = useAppStore((s) => s.selectedAlbum);
@@ -13,7 +22,7 @@ export default function TrackMeta() {
   // — nothing here comes from iTunes, just the filename.
   if (!selectedAlbum) {
     return (
-      <div className="pointer-events-none absolute left-6 top-24 flex max-w-xs flex-col gap-4 text-fg sm:left-10 sm:top-28">
+      <div className={META_POSITION}>
         <div>
           <p className="text-[0.65rem] uppercase tracking-[0.25em] text-muted">
             Now playing
@@ -30,7 +39,7 @@ export default function TrackMeta() {
   }
 
   return (
-    <div className="pointer-events-none absolute left-6 top-24 flex max-w-xs flex-col gap-4 text-fg sm:left-10 sm:top-28">
+    <div className={META_POSITION}>
       {selectedAlbum.artworkUrl && (
         <Image
           src={selectedAlbum.artworkUrl}

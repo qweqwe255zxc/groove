@@ -395,7 +395,7 @@ export default function VinylPanel() {
   return (
     <div
       ref={panelRef}
-      className="fixed inset-0 z-30 flex flex-col items-center justify-center gap-10 px-6 sm:flex-row sm:gap-16 sm:px-16"
+      className="fixed inset-0 z-30 flex flex-col items-center justify-center gap-8 px-4 sm:flex-row sm:gap-16 sm:px-16"
     >
       {/* Separate from `panel` so it can fade independently on close while
           the flying cover (a sibling, not a descendant of this div) stays
@@ -411,7 +411,11 @@ export default function VinylPanel() {
         type="button"
         onClick={handleClose}
         aria-label="Close album details"
-        className="absolute right-6 top-24 rounded-full border border-line px-4 py-2 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg cursor-pointer sm:right-10"
+        /* z-10 because the vinyl below is a later sibling and would
+           otherwise paint straight over this — which is exactly what
+           happened on a 320px screen, where the disc is wide enough to
+           reach under it. */
+        className="absolute right-4 top-20 z-10 rounded-full border border-line px-3 py-2 text-[11px] uppercase tracking-widest text-fg transition-colors hover:border-fg cursor-pointer sm:right-10 sm:top-24 sm:px-4 sm:text-xs sm:tracking-[0.2em]"
       >
         Close
       </button>
@@ -419,7 +423,9 @@ export default function VinylPanel() {
       <div
         ref={coverRef}
         data-flip-id={`album-cover-${selectedAlbum.collectionId}`}
-        className="relative h-56 w-56 shrink-0 overflow-hidden rounded-full border border-line shadow-2xl sm:h-72 sm:w-72"
+        /* h-44 below 380px: at 320 a 14rem disc leaves the title and Play
+           button fighting for what's left of a 568px-tall screen. */
+        className="relative h-44 w-44 shrink-0 overflow-hidden rounded-full border border-line shadow-2xl min-[380px]:h-56 min-[380px]:w-56 sm:h-72 sm:w-72"
       >
         {selectedAlbum.artworkUrl && (
           <Image
