@@ -7,8 +7,10 @@ import * as THREE from "three";
 import gsap from "gsap";
 import { useAppStore } from "@/store/useAppStore";
 import { useAudioAnalyser } from "@/hooks/useAudioAnalyser";
+import { useGsapClose } from "@/hooks/useGsapClose";
 import { useResolvedTheme } from "@/hooks/useResolvedTheme";
 import { getParticleColors, getPalette } from "./palettes";
+import CanvasErrorBoundary from "./CanvasErrorBoundary";
 import OrbScene from "./scenes/OrbScene";
 import TerrainScene from "./scenes/TerrainScene";
 import SettingsPanel from "./SettingsPanel";
@@ -62,6 +64,14 @@ const HAVE_FUTURE_DATA = 3;
 // Ceiling (seconds) on how far the displayed position may run ahead of the
 // last `currentTime` the element actually confirmed.
 const MAX_EXTRAPOLATION = 0.5;
+
+// Arrow-key nudges: Left/Right seeks, Up/Down adjusts volume. Both animate
+// to the new position over this duration rather than snapping instantly —
+// short enough to still feel like a direct response to the key, long enough
+// to actually read as a glide.
+const SEEK_KEY_STEP = 5;
+const VOLUME_KEY_STEP = 0.05;
+const ARROW_KEY_TWEEN_DURATION = 0.15;
 
 // mm:ss for the time readout next to Play — previews never run long enough
 // to need an hours place.
@@ -214,6 +224,11 @@ export default function VisualizerStage() {
   // reporting the pre-seek position for a few frames and writing that back
   // into `input.value` would drag the thumb out from under the pointer.
   const isScrubbingRef = useRef(false);
+  // Same idea as isScrubbingRef, set for the duration of an arrow-key seek's
+  // tween (see seekBy below) instead of a pointer drag — the tween is the
+  // one writing `el.currentTime` every frame during that window, so the loop
+  // has to stand down for it too or the two fight over displayTimeRef.
+  const isKeySeekingRef = useRef(false);
 
   // Re-syncs all three clocks to a known position — used anywhere the
   // position changes for a reason the extrapolation can't see coming (a new
@@ -268,7 +283,7 @@ export default function VisualizerStage() {
     // so every element the frame paints agrees on when "now" is.
     function tick(now: number) {
       frame = requestAnimationFrame(tick);
-      if (!el || isScrubbingRef.current) {
+      if (!el || isScrubbingRef.current || isKeySeekingRef.current) {
         lastFrameRef.current = now;
         return;
       }
@@ -458,11 +473,14 @@ export default function VisualizerStage() {
     togglePlaying();
   }, [togglePlaying]);
 
-  const handleSeek = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = Number(e.target.value);
+  // The actual seek: written to the element, restores the pre-emptive end
+  // fade if the new position backs out of its window, and re-syncs the
+  // display loop's baseline. Shared by handleSeek's non-drag branch (a click
+  // or a native keyboard step on the focused input, both a single discrete
+  // change) and handleScrubEnd (a drag's final position, on release).
+  const commitSeek = useCallback(
+    (value: number, dur: number) => {
       const el = audioRef.current;
-      const dur = el?.duration || duration;
       if (el) {
         el.currentTime = value;
         // Dragging back out of the last FADE_DURATION seconds has to undo
@@ -475,20 +493,74 @@ export default function VisualizerStage() {
           if (isPlaying) el.volume = useAppStore.getState().volume;
         }
       }
-      // Anchor from the requested position, not el.currentTime: the seek is
-      // still pending, so the element can keep reporting the old position
-      // for a few more frames.
       anchorPlayback(value);
       updateSeekDisplay(value, dur);
     },
-    [duration, isPlaying, updateSeekDisplay, anchorPlayback]
+    [isPlaying, anchorPlayback, updateSeekDisplay]
+  );
+
+  const handleSeek = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = Number(e.target.value);
+      const dur = audioRef.current?.duration || duration;
+      // While the thumb is actively being dragged, only move the visual
+      // position — actually seeking the element on every intermediate value
+      // here (the old behaviour) fired a real `el.currentTime` write per
+      // pointer-move tick, which sounds like scratching a record instead of
+      // scrubbing one. Playback keeps running from wherever it already was
+      // until the drag ends; handleScrubEnd below commits the real seek
+      // exactly once, to wherever the user let go.
+      if (isScrubbingRef.current) {
+        updateSeekDisplay(value, dur);
+        return;
+      }
+      commitSeek(value, dur);
+    },
+    [duration, updateSeekDisplay, commitSeek]
+  );
+
+  // Arrow-key seek (Left/Right) — tweens to the target instead of jumping
+  // straight there, unlike handleSeek (dragging the bar already gives its
+  // own continuous, un-eased feedback, so a tap of the arrow key is the one
+  // case that needs the motion added artificially). `isKeySeekingRef` stands
+  // the rAF display loop down for the tween's duration — same reason
+  // `isScrubbingRef` does for a pointer drag — since this writes
+  // `el.currentTime` every frame itself.
+  const seekTweenRef = useRef({ time: 0 });
+  const seekBy = useCallback(
+    (delta: number) => {
+      const el = audioRef.current;
+      const dur = el?.duration || duration;
+      const target = Math.min(Math.max(displayTimeRef.current + delta, 0), dur || 0);
+
+      isKeySeekingRef.current = true;
+      const proxy = seekTweenRef.current;
+      proxy.time = displayTimeRef.current;
+      gsap.killTweensOf(proxy);
+      gsap.to(proxy, {
+        time: target,
+        duration: ARROW_KEY_TWEEN_DURATION,
+        ease: "power2.out",
+        onUpdate: () => {
+          if (el) el.currentTime = proxy.time;
+          displayTimeRef.current = proxy.time;
+          updateSeekDisplay(proxy.time, dur);
+        },
+        onComplete: () => {
+          isKeySeekingRef.current = false;
+          commitSeek(target, dur);
+        },
+      });
+    },
+    [duration, updateSeekDisplay, commitSeek]
   );
 
   // The thumb is the user's to move while they hold it — the rAF loop above
   // checks this flag and leaves the input alone until the pointer is
-  // released, at which point playback is re-anchored to wherever they let
-  // go. onLostPointerCapture covers the release landing outside the input,
-  // which a range element captures the pointer for.
+  // released, at which point the real seek is committed to wherever they let
+  // go (see handleSeek/commitSeek above). onLostPointerCapture covers the
+  // release landing outside the input, which a range element captures the
+  // pointer for.
   const handleScrubStart = useCallback(() => {
     isScrubbingRef.current = true;
   }, []);
@@ -496,8 +568,9 @@ export default function VisualizerStage() {
   const handleScrubEnd = useCallback(() => {
     if (!isScrubbingRef.current) return;
     isScrubbingRef.current = false;
-    anchorPlayback(Number(seekRef.current?.value ?? 0));
-  }, [anchorPlayback]);
+    const dur = audioRef.current?.duration || duration;
+    commitSeek(Number(seekRef.current?.value ?? 0), dur);
+  }, [duration, commitSeek]);
 
   // Sets el.volume directly rather than through the store's `volume` value
   // as a dependency — wiring the fade-in effect above to `volume` would
@@ -517,6 +590,28 @@ export default function VisualizerStage() {
     [isPlaying, setVolume]
   );
 
+  // Arrow-key volume (Up/Down) — tweens through handleVolumeChange every
+  // frame (same live `el.volume` write dragging the slider gets) instead of
+  // jumping straight to the target, so a tap of the arrow key reads as a
+  // glide rather than a step.
+  const volumeTweenRef = useRef({ v: 0 });
+  const volumeBy = useCallback(
+    (delta: number) => {
+      const raw = useAppStore.getState().volume + delta;
+      const target = Math.round(Math.min(Math.max(raw, 0), 1) * 100) / 100;
+      const proxy = volumeTweenRef.current;
+      proxy.v = useAppStore.getState().volume;
+      gsap.killTweensOf(proxy);
+      gsap.to(proxy, {
+        v: target,
+        duration: ARROW_KEY_TWEEN_DURATION,
+        ease: "sine.inOut",
+        onUpdate: () => handleVolumeChange(proxy.v),
+      });
+    },
+    [handleVolumeChange]
+  );
+
   // Entrance fade — this used to just pop in instantly on the same frame
   // as the click, the only overlay in the app with no opening transition.
   useEffect(() => {
@@ -533,22 +628,11 @@ export default function VisualizerStage() {
   // Closing used to flip `isVisualizerOpen` straight to false, which yanks
   // the whole conditionally-rendered overlay out on the same frame as the
   // click — every other overlay in the app (menu, vinyl panel) animates its
-  // close. Mirrors VinylPanel's handleClose: animate first, only flip the
-  // store flag (which actually unmounts this) once the fade finishes.
+  // close.
+  const animateClose = useGsapClose(stageRef, closeVisualizer);
   const handleClose = useCallback(() => {
-    const el = stageRef.current;
-    if (!el) {
-      closeVisualizer();
-      return;
-    }
-    gsap.to(el, {
-      autoAlpha: 0,
-      scale: 1.04,
-      duration: 0.35,
-      ease: "power2.in",
-      onComplete: closeVisualizer,
-    });
-  }, [closeVisualizer]);
+    animateClose({ autoAlpha: 0, scale: 1.04, duration: 0.35, ease: "power2.in" });
+  }, [animateClose]);
 
   const [shareCopied, setShareCopied] = useState(false);
   const handleShare = useCallback(() => {
@@ -563,24 +647,52 @@ export default function VisualizerStage() {
       .catch(() => {});
   }, [selectedAlbum, activeTrack]);
 
-  // Space toggles playback, Escape closes the overlay. Both call
-  // preventDefault(): without it, Space would ALSO re-click whichever button
-  // currently has focus — almost always the Play/Pause button itself, right
-  // after being clicked — double-toggling playback instead of once.
+  // Space toggles playback, Escape closes the overlay, Left/Right seek ±5s,
+  // Up/Down adjust volume ±5%. All five call preventDefault(): without it,
+  // Space would ALSO re-click whichever button currently has focus — almost
+  // always the Play/Pause button itself, right after being clicked —
+  // double-toggling playback instead of once; Up/Down would otherwise also
+  // scroll the page behind the overlay.
   useEffect(() => {
     if (!isVisualizerOpen) return;
     function handleKeyDown(e: KeyboardEvent) {
+      // The seek bar, volume slider, and Settings' sensitivity slider are
+      // all native <input type="range">s with their own arrow-key stepping
+      // — bail out here rather than fight them for Left/Right/Up/Down while
+      // one of them has focus.
+      if (
+        (e.key === "ArrowLeft" ||
+          e.key === "ArrowRight" ||
+          e.key === "ArrowUp" ||
+          e.key === "ArrowDown") &&
+        e.target instanceof HTMLElement &&
+        e.target.tagName === "INPUT"
+      ) {
+        return;
+      }
       if (e.key === " " || e.code === "Space") {
         e.preventDefault();
         handleTogglePlaying();
       } else if (e.key === "Escape") {
         e.preventDefault();
         handleClose();
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        seekBy(-SEEK_KEY_STEP);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        seekBy(SEEK_KEY_STEP);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        volumeBy(VOLUME_KEY_STEP);
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        volumeBy(-VOLUME_KEY_STEP);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isVisualizerOpen, handleTogglePlaying, handleClose]);
+  }, [isVisualizerOpen, handleTogglePlaying, handleClose, seekBy, volumeBy]);
 
   return (
     <>
@@ -623,35 +735,37 @@ export default function VisualizerStage() {
           className="fixed inset-0 z-50 flex flex-col"
           style={{ background: palette.background }}
         >
-          <Canvas camera={{ position: BASE_CAMERA_POSITION, fov: 45 }}>
-            <ResponsiveCamera />
-            <color attach="background" args={[palette.background]} />
-            <fog attach="fog" args={[palette.background, BASE_FOG_NEAR, BASE_FOG_FAR]} />
-            {visualizerMode === "orb" ? (
-              <OrbScene audio={audio} particleColors={particleColors} theme={theme} />
-            ) : (
-              <TerrainScene audio={audio} particleColors={particleColors} theme={theme} />
-            )}
-            <EffectComposer>
-              {[
-                theme === "dark" && (
-                  <Bloom
-                    key="bloom"
-                    luminanceThreshold={DARK_BLOOM_TUNING.luminanceThreshold}
-                    luminanceSmoothing={DARK_BLOOM_TUNING.luminanceSmoothing}
-                    intensity={DARK_BLOOM_TUNING.intensity}
-                    mipmapBlur
-                  />
-                ),
-                <Vignette
-                  key="vignette"
-                  eskil={false}
-                  offset={0.15}
-                  darkness={theme === "dark" ? 0.9 : 0.35}
-                />,
-              ].filter((el): el is React.JSX.Element => el !== false)}
-            </EffectComposer>
-          </Canvas>
+          <CanvasErrorBoundary onReset={handleClose}>
+            <Canvas camera={{ position: BASE_CAMERA_POSITION, fov: 45 }}>
+              <ResponsiveCamera />
+              <color attach="background" args={[palette.background]} />
+              <fog attach="fog" args={[palette.background, BASE_FOG_NEAR, BASE_FOG_FAR]} />
+              {visualizerMode === "orb" ? (
+                <OrbScene audio={audio} particleColors={particleColors} theme={theme} />
+              ) : (
+                <TerrainScene audio={audio} particleColors={particleColors} theme={theme} />
+              )}
+              <EffectComposer>
+                {[
+                  theme === "dark" && (
+                    <Bloom
+                      key="bloom"
+                      luminanceThreshold={DARK_BLOOM_TUNING.luminanceThreshold}
+                      luminanceSmoothing={DARK_BLOOM_TUNING.luminanceSmoothing}
+                      intensity={DARK_BLOOM_TUNING.intensity}
+                      mipmapBlur
+                    />
+                  ),
+                  <Vignette
+                    key="vignette"
+                    eskil={false}
+                    offset={0.15}
+                    darkness={theme === "dark" ? 0.9 : 0.35}
+                  />,
+                ].filter((el): el is React.JSX.Element => el !== false)}
+              </EffectComposer>
+            </Canvas>
+          </CanvasErrorBoundary>
 
           <TrackMeta />
 

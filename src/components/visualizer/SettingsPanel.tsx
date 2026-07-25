@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { useAppStore, type ColorScheme } from "@/store/useAppStore";
 import type { SystemTheme } from "@/hooks/useSystemTheme";
+import { useGsapClose } from "@/hooks/useGsapClose";
 import { getParticleColors, getPalette } from "./palettes";
 
 const SCHEMES: ColorScheme[] = ["mono", "clay", "sage", "neon"];
@@ -21,25 +22,11 @@ export default function SettingsPanel({
   const colorScheme = useAppStore((s) => s.colorScheme);
   const setColorScheme = useAppStore((s) => s.setColorScheme);
 
-  // Mirrors VisualizerStage's handleClose: animate the panel out first,
-  // only flip `open` (which actually unmounts it) once the tween finishes —
-  // an instant unmount on outside-click/Escape/toggle would skip the close
-  // animation entirely.
+  const handlePanelClosed = useCallback(() => setOpen(false), []);
+  const animateClose = useGsapClose(panelRef, handlePanelClosed);
   const handleClose = useCallback(() => {
-    const panel = panelRef.current;
-    if (!panel) {
-      setOpen(false);
-      return;
-    }
-    gsap.to(panel, {
-      autoAlpha: 0,
-      y: 8,
-      scale: 0.96,
-      duration: 0.18,
-      ease: "power2.in",
-      onComplete: () => setOpen(false),
-    });
-  }, []);
+    animateClose({ autoAlpha: 0, y: 8, scale: 0.96, duration: 0.18, ease: "power2.in" });
+  }, [animateClose]);
 
   // Dropdown-style panel: clicking anywhere outside it (not just the
   // toggle button) should close it, same expectation as VinylPanel's
