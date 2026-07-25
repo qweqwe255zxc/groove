@@ -82,7 +82,7 @@ export const useAppStore = create<AppState>((set) => ({
   colorScheme: "mono",
   themePreference: "system",
   ambientMuted: false,
-  volume: 1,
+  volume: .5,
 
   isMenuOpen: false,
   introComplete: false,
