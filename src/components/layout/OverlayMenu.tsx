@@ -143,7 +143,15 @@ export default function OverlayMenu() {
         className="mt-8 flex max-w-lg flex-wrap items-center justify-between gap-x-8 gap-y-2 text-xs uppercase tracking-[0.2em] text-muted"
       >
         <p className="max-w-sm normal-case tracking-normal text-sm">
-          Built with Three.js and the Web Audio API.
+          Built with Three.js and the Web Audio API.{" "}<br/>
+          <a
+            href="https://github.com/qweqwe255zxc"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-fg underline decoration-line underline-offset-4 hover:decoration-fg"
+          >
+            Built by Bakushin
+          </a>
         </p>
         <div className="flex items-center gap-6">
           <ThemeToggle variant="menu" />
