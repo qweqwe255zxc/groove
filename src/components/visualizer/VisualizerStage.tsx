@@ -37,14 +37,12 @@ const DARK_BLOOM_TUNING = { luminanceThreshold: 0.1, luminanceSmoothing: 0.95, i
 // A track genuinely starting (fresh load from VinylPanel's Play button) or
 // genuinely ending (onEnded, closeVisualizer) gets this — long enough to
 // read as a deliberate artistic fade, not just anti-click smoothing.
-const FADE_DURATION = 1.5;
+const FADE_DURATION = 2;
 // An explicit Pause/Resume mid-track (button or Spacebar — see fastFadeRef
-// below) gets this instead: short enough that it's inaudible as a "fade" in
-// its own right, just long enough to land the volume change across a few
-// sample frames instead of one discontinuous jump — which is what actually
-// causes the audible click/pop (a waveform cut off somewhere other than a
-// zero-crossing), not the pause/resume itself.
-const MICRO_FADE_DURATION = 0.05;
+// below) gets this instead — quicker than the artistic fade so the two feel
+// distinct, but still slow enough to read as a deliberate fade rather than a
+// hard cut.
+const MICRO_FADE_DURATION = 0.5;
 
 // A fixed vertical `fov` plus a fixed camera distance only fits the scene at
 // the aspect ratio it was tuned for (desktop, ~16:9). Three.js/R3F derive the
