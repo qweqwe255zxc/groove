@@ -34,6 +34,14 @@ const BASE_FOG_FAR = 13;
 // needed to grab more of them and spread what it grabs further.
 const DARK_BLOOM_TUNING = { luminanceThreshold: 0.1, luminanceSmoothing: 0.95, intensity: 1.9 };
 
+// Play always fades in over this long, and pause fades out over this long
+// too by default (onEnded, closeVisualizer) — a symmetric "settling in/out"
+// feel. An explicit Pause click/Spacebar gets the shorter PAUSE_FADE_DURATION
+// instead (see fastPauseRef below), so hitting pause reads as responsive
+// rather than matching the same leisurely fade playback started with.
+const FADE_DURATION = 1;
+const PAUSE_FADE_DURATION = 0.35;
+
 // A fixed vertical `fov` plus a fixed camera distance only fits the scene at
 // the aspect ratio it was tuned for (desktop, ~16:9). Three.js/R3F derive the
 // *horizontal* FOV from `vFov` and the canvas aspect ratio, so a portrait
@@ -139,6 +147,15 @@ export default function VisualizerStage() {
     }
   }, [selectedAlbum, activeTrack]);
 
+  // Set right before an explicit Play/Pause click or Spacebar toggles from
+  // playing to paused (see handleTogglePlaying below) — consumed once by the
+  // effect below, so a fast fade only ever applies to that one transition.
+  // Left false for onEnded and closeVisualizer, which both also flip
+  // isPlaying to false but read as "this session of listening is over"
+  // rather than "pause" — those keep the slower symmetric fade that matches
+  // how playback started.
+  const fastPauseRef = useRef(false);
+
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
@@ -146,16 +163,30 @@ export default function VisualizerStage() {
     // track switch mid-fade) would otherwise leave two tweens fighting over
     // `el.volume`.
     gsap.killTweensOf(el);
+    // el.play() is async (it can be waiting on buffering) — if isPlaying
+    // flips back to false before it resolves, this effect has already
+    // re-run for the pause and started the fade-to-0 tween by the time the
+    // stale `.then()` fires. Without this guard that stale callback would
+    // start a *second*, competing fade-to-1 tween on top of it (killTweensOf
+    // above can't help — it runs before this promise settles, not after).
+    let cancelled = false;
     if (isPlaying) {
       audio.resume();
       el.volume = 0;
       el.play()
-        .then(() => gsap.to(el, { volume: 1, duration: 1, ease: "sine.inOut" }))
-        .catch(() => togglePlaying(false));
+        .then(() => {
+          if (cancelled) return;
+          gsap.to(el, { volume: 1, duration: FADE_DURATION, ease: "sine.inOut" });
+        })
+        .catch(() => {
+          if (!cancelled) togglePlaying(false);
+        });
     } else {
+      const duration = fastPauseRef.current ? PAUSE_FADE_DURATION : FADE_DURATION;
+      fastPauseRef.current = false;
       gsap.to(el, {
         volume: 0,
-        duration: 1,
+        duration,
         ease: "sine.inOut",
         onComplete: () => el.pause(),
       });
@@ -165,7 +196,18 @@ export default function VisualizerStage() {
     // staying `true` across the switch) wouldn't re-run this effect at all,
     // since React only reruns on a dependency's value actually changing. The
     // new src would load (the other effect above) but never actually play.
+    return () => {
+      cancelled = true;
+    };
   }, [isPlaying, activeTrack?.previewUrl, audio, togglePlaying]);
+
+  // Wraps togglePlaying() for the two explicit-pause entry points (button,
+  // Spacebar) so the fade above can tell "user hit pause" apart from
+  // onEnded/closeVisualizer also flipping isPlaying to false.
+  const handleTogglePlaying = useCallback(() => {
+    if (isPlaying) fastPauseRef.current = true;
+    togglePlaying();
+  }, [isPlaying, togglePlaying]);
 
   // Entrance fade — this used to just pop in instantly on the same frame
   // as the click, the only overlay in the app with no opening transition.
@@ -222,7 +264,7 @@ export default function VisualizerStage() {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === " " || e.code === "Space") {
         e.preventDefault();
-        togglePlaying();
+        handleTogglePlaying();
       } else if (e.key === "Escape") {
         e.preventDefault();
         handleClose();
@@ -230,7 +272,7 @@ export default function VisualizerStage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isVisualizerOpen, togglePlaying, handleClose]);
+  }, [isVisualizerOpen, handleTogglePlaying, handleClose]);
 
   return (
     <>
@@ -317,7 +359,7 @@ export default function VisualizerStage() {
           <div className="absolute bottom-6 left-6 sm:left-10 sm:bottom-10">
             <button
               type="button"
-              onClick={() => togglePlaying()}
+              onClick={handleTogglePlaying}
               className="rounded-full border border-line px-5 py-2 text-xs uppercase tracking-[0.2em] text-fg transition-colors hover:border-fg cursor-pointer"
             >
               {isPlaying ? "Pause" : "Play"}
