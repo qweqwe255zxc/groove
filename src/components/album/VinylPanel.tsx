@@ -12,7 +12,13 @@ import TrackList, { TrackListSkeleton } from "./TrackList";
 // at the same height. Capped in vh, not rows: this panel is vertically
 // centred against the viewport, and a fixed row count that fits a desktop
 // window pushes the title and Play button off a 320x568 phone screen.
-const LIST_CLASS = "max-h-[22vh] pr-1 min-[380px]:max-h-[26vh] sm:max-h-[34vh]";
+// `scrollbar-gutter: stable` on both for the same reason they share a row
+// height — where scrollbars take real layout width (Windows, or macOS set
+// to always show them) the real list's would appear on swap and shove every
+// row's text sideways. It costs nothing under overlay scrollbars, which is
+// what macOS does by default.
+const LIST_CLASS =
+  "max-h-[22vh] pr-1 [scrollbar-gutter:stable] min-[380px]:max-h-[26vh] sm:max-h-[34vh]";
 
 // The idle spin (`.animate-spin-vinyl` in globals.css) does one full turn
 // every 2.6s at a constant rate — kept in sync here so the custom eases
@@ -509,7 +515,22 @@ export default function VinylPanel() {
         </div>
       </div>
 
-      <div ref={detailsRef} className="flex max-w-sm flex-col gap-6 text-fg">
+      {/* `w-full`, not just the `max-w-sm` cap: without a width of its own
+          this column is sized by its widest child, so it was *narrow* while
+          the tracklist placeholder was up (its bars sit on `flex-1` and ask
+          for almost nothing) and snapped wide the moment real track titles
+          arrived — and since the row is `justify-center`, everything,
+          vinyl included, slid sideways to re-centre around the new width.
+          Pinned to the cap instead, the column is the same width before and
+          after the fetch, and the same width for a one-word album as for a
+          long one. `min-w-0` so the cap can still shrink below its content
+          on a narrow screen (a flex item's floor is its min-content size
+          otherwise, and the truncating track rows inside would hold it
+          open). */}
+      <div
+        ref={detailsRef}
+        className="flex w-full min-w-0 max-w-sm flex-col gap-6 text-fg"
+      >
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-muted">
             {selectedAlbum.genre} · {selectedAlbum.year}
