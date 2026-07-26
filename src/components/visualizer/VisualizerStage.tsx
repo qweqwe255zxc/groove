@@ -18,6 +18,7 @@ import {
   PILL_ROW_ITEM,
   PILL_SHAPE,
 } from "./controlStyles";
+import { NextIcon, PrevIcon } from "@/components/icons/transport";
 import CanvasErrorBoundary from "./CanvasErrorBoundary";
 import OrbScene from "./scenes/OrbScene";
 import TerrainScene from "./scenes/TerrainScene";
@@ -1106,9 +1107,9 @@ export default function VisualizerStage() {
                     type="button"
                     onClick={handlePrev}
                     aria-label="Previous track"
-                    className={`${PILL_BUTTON} shrink-0 px-5 py-3 leading-none md:px-3 md:py-2`}
+                    className={`${PILL_BUTTON} flex shrink-0 items-center justify-center px-5 py-3 md:px-3 md:py-2`}
                   >
-                    <span aria-hidden>◀◀</span>
+                    <PrevIcon className="h-2.5 w-4" />
                   </button>
                 )}
                 {/* The one filled control in the overlay, at every width:
@@ -1134,9 +1135,9 @@ export default function VisualizerStage() {
                     onClick={handleNext}
                     disabled={!nextTrack}
                     aria-label="Next track"
-                    className={`${PILL_BUTTON} shrink-0 px-5 py-3 leading-none disabled:cursor-not-allowed disabled:opacity-40 md:px-3 md:py-2`}
+                    className={`${PILL_BUTTON} flex shrink-0 items-center justify-center px-5 py-3 disabled:cursor-not-allowed disabled:opacity-40 md:px-3 md:py-2`}
                   >
-                    <span aria-hidden>▶▶</span>
+                    <NextIcon className="h-2.5 w-4" />
                   </button>
                 )}
               </div>

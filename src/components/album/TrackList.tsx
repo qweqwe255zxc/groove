@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import type { Track } from "@/lib/itunes";
 import { formatTrackDuration } from "@/lib/tracks";
+import { PauseGlyph, PlayGlyph } from "@/components/icons/transport";
 
 /**
  * The album's tracks as a selectable list, shared by VinylPanel (choosing
@@ -45,6 +46,14 @@ export default function TrackList({
   return (
     <ol
       ref={listRef}
+      /* Lenis calls preventDefault() on every wheel and touchmove event
+         while it's stopped — and it's stopped exactly when this list is on
+         screen, since both places it appears (VinylPanel, the visualizer)
+         lock background scrolling. That kills native scrolling inside
+         nested containers too, so the list simply didn't move. This
+         attribute is Lenis's own escape hatch: a gesture whose composed
+         path contains it is handed straight back to the browser. */
+      data-lenis-prevent
       /* overscroll-contain so flicking past the end of the list doesn't
          hand the rest of the gesture to whatever is behind it. */
       className={`overflow-y-auto overscroll-contain ${className}`.trim()}
@@ -74,11 +83,15 @@ export default function TrackList({
                   pixels out of line with every other one. */}
               <span
                 aria-hidden
-                className={`w-3 shrink-0 text-[0.6rem] leading-none ${
+                className={`flex w-3 shrink-0 justify-center ${
                   isActive ? "text-accent" : "text-transparent"
                 }`}
               >
-                {isActive && !isPlaying ? "❚❚" : "▶"}
+                {isActive && !isPlaying ? (
+                  <PauseGlyph className="h-2 w-2" />
+                ) : (
+                  <PlayGlyph className="h-2 w-2" />
+                )}
               </span>
               <span className="min-w-0 flex-1 truncate text-sm">
                 {track.trackName}
