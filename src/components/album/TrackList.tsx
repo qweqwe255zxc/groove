@@ -5,6 +5,15 @@ import type { Track } from "@/lib/itunes";
 import { formatTrackDuration } from "@/lib/tracks";
 import { PauseGlyph, PlayGlyph } from "@/components/icons/transport";
 
+// A row's height is pinned here rather than left to its content, and the
+// class is shared with the skeleton below, because VinylPanel reserves the
+// list's space from the album's trackCount *before* the tracks themselves
+// arrive — a placeholder row a pixel off the real one reserves the wrong
+// height and the layout still jumps when the real list lands. h-9 is what
+// the content came out to anyway (text-sm's 20px line box + py-2).
+const ROW_BASE =
+  "flex h-9 w-full items-center gap-3 rounded-lg px-2 py-2 text-left";
+
 /**
  * The album's tracks as a selectable list, shared by VinylPanel (choosing
  * what to start before entering the visualizer) and TrackListPanel (the
@@ -69,7 +78,7 @@ export default function TrackList({
               disabled={!playable}
               data-active={isActive}
               aria-current={isActive ? "true" : undefined}
-              className={`flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors ${
+              className={`${ROW_BASE} transition-colors ${
                 playable
                   ? "cursor-pointer hover:bg-fg/5"
                   : "cursor-not-allowed opacity-40"
@@ -103,6 +112,48 @@ export default function TrackList({
           </li>
         );
       })}
+    </ol>
+  );
+}
+
+// Varied per row so the placeholder reads as a list of titles rather than a
+// stack of identical bars. Indexed, not random — a random width would be a
+// different value on every re-render (and differ between server and client).
+const BAR_WIDTHS = ["72%", "54%", "83%", "61%", "76%", "48%"];
+
+/**
+ * Stands in for the list while the track fetch is in flight, at the exact
+ * height the real one will take (same row class, same wrapper classes, row
+ * count from the album's own `trackCount`) — see VinylPanel for why the
+ * height has to be right before the tracks land.
+ */
+export function TrackListSkeleton({
+  count,
+  className = "",
+}: {
+  count: number;
+  className?: string;
+}) {
+  return (
+    <ol
+      aria-hidden
+      /* overflow-hidden rather than the real list's overflow-y-auto: the
+         caller's max-h still caps it identically, but there's nothing here
+         worth scrolling to. */
+      className={`animate-pulse overflow-hidden ${className}`.trim()}
+    >
+      {Array.from({ length: count }, (_, i) => (
+        <li key={i} className={ROW_BASE}>
+          <span className="h-2 w-5 shrink-0 rounded-full bg-fg/10" />
+          {/* Matches the real row's fixed-width marker column. */}
+          <span className="w-3 shrink-0" />
+          <span
+            className="h-2 flex-1 rounded-full bg-fg/10"
+            style={{ maxWidth: BAR_WIDTHS[i % BAR_WIDTHS.length] }}
+          />
+          <span className="h-2 w-6 shrink-0 rounded-full bg-fg/10" />
+        </li>
+      ))}
     </ol>
   );
 }

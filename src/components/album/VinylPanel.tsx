@@ -6,7 +6,13 @@ import gsap from "gsap";
 import { useAppStore } from "@/store/useAppStore";
 import { Flip } from "@/lib/flip";
 import type { Track } from "@/lib/itunes";
-import TrackList from "./TrackList";
+import TrackList, { TrackListSkeleton } from "./TrackList";
+
+// Shared by the real list and its loading placeholder so the two are capped
+// at the same height. Capped in vh, not rows: this panel is vertically
+// centred against the viewport, and a fixed row count that fits a desktop
+// window pushes the title and Play button off a 320x568 phone screen.
+const LIST_CLASS = "max-h-[22vh] pr-1 min-[380px]:max-h-[26vh] sm:max-h-[34vh]";
 
 // The idle spin (`.animate-spin-vinyl` in globals.css) does one full turn
 // every 2.6s at a constant rate — kept in sync here so the custom eases
@@ -101,28 +107,66 @@ export default function VinylPanel() {
   const tracksLoading = selectedAlbum
     ? resolvedId !== selectedAlbum.collectionId
     : false;
+  // Wraps the "N tracks" caption and the list/placeholder, so the height
+  // handover below can tween the one box the column's height depends on.
+  const listWrapRef = useRef<HTMLDivElement>(null);
+  // The height the placeholder was holding at the moment the real tracks
+  // were handed to the store — captured there rather than in an effect
+  // because that's the last point at which the old layout is still on
+  // screen. Null means "nothing to hand over from".
+  const pendingListHeightRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!selectedAlbum) return;
+    const album = selectedAlbum;
     let cancelled = false;
 
-    fetch(`/api/albums/${selectedAlbum.collectionId}/tracks`)
+    function resolve(next: Track[]) {
+      if (cancelled) return;
+      pendingListHeightRef.current = listWrapRef.current?.offsetHeight ?? null;
+      setTracks(next);
+      setResolvedId(album.collectionId);
+    }
+
+    fetch(`/api/albums/${album.collectionId}/tracks`)
       .then((res) => res.json())
-      .then((data: { tracks?: Track[] }) => {
-        if (cancelled) return;
-        setTracks(data.tracks ?? []);
-        setResolvedId(selectedAlbum.collectionId);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setTracks([]);
-        setResolvedId(selectedAlbum.collectionId);
-      });
+      .then((data: { tracks?: Track[] }) => resolve(data.tracks ?? []))
+      .catch(() => resolve([]));
 
     return () => {
       cancelled = true;
     };
   }, [selectedAlbum, setTracks]);
+
+  // The placeholder is sized from the album's advertised `trackCount`, which
+  // is usually exactly what the lookup returns (and moot at all for albums
+  // long enough that both hit the max-height cap) — but not always: a
+  // multi-disc collection or a region-restricted release can come back a few
+  // rows short. Rather than let that difference land as a jump, the wrapper
+  // tweens from whatever height it was holding to the real one. Runs before
+  // paint, so the real list is never seen at its own height first.
+  useLayoutEffect(() => {
+    const el = listWrapRef.current;
+    const from = pendingListHeightRef.current;
+    pendingListHeightRef.current = null;
+    if (!el || from === null) return;
+
+    const to = el.offsetHeight;
+    if (Math.abs(to - from) < 1) return;
+    gsap.fromTo(
+      el,
+      // overflow while it's mid-tween: the box is briefly shorter than the
+      // list inside it, and the list's own scroll container would otherwise
+      // spill past it.
+      { height: from, overflow: "hidden" },
+      {
+        height: to,
+        duration: 0.3,
+        ease: "power2.out",
+        clearProps: "height,overflow",
+      }
+    );
+  }, [tracks]);
 
   // Run the cover -> vinyl Flip once this panel (and its matching
   // data-flip-id element) has mounted in its resting layout. useLayoutEffect
@@ -396,6 +440,14 @@ export default function VinylPanel() {
   if (!selectedAlbum) return null;
 
   const playableTrack = tracks.find((t) => t.previewUrl);
+  // While the fetch is in flight, the album's own trackCount (iTunes returns
+  // it alongside the album, so it's already in the store) stands in for the
+  // list that's about to arrive. Without it the panel opened around a
+  // details column with no tracklist in it at all, the Flip flew the vinyl
+  // into place against *that* layout, and then the tracks landed and shoved
+  // the whole stacked column upward — the vinyl visibly jumping a moment
+  // after it had settled.
+  const listCount = tracksLoading ? selectedAlbum.trackCount : tracks.length;
 
   return (
     <div
@@ -487,25 +539,25 @@ export default function VinylPanel() {
             fetch puts every track in the store either way; before this
             list existed the other eleven tracks of an album were simply
             unreachable, since Play always took the first playable one. */}
-        {tracks.length > 1 && (
-          <div className="min-h-0">
+        {listCount > 1 && (
+          <div ref={listWrapRef} className="min-h-0">
             {/* Hidden below 380px purely for the ~28px it costs — the list
                 underneath is self-evidently a tracklist, and at that height
                 the count is the least useful thing competing for room. */}
             <p className="mb-2 hidden text-xs uppercase tracking-[0.2em] text-muted min-[380px]:block">
-              {tracks.length} tracks
+              {listCount} tracks
             </p>
-            <TrackList
-              tracks={tracks}
-              activeTrackId={activeTrack?.trackId ?? null}
-              isPlaying={isPlaying}
-              onSelect={playTrack}
-              /* Capped in vh, not rows: this panel is vertically centred
-                 against the viewport, and a fixed row count that fits a
-                 desktop window pushes the title and Play button off a
-                 320×568 phone screen. */
-              className="max-h-[22vh] pr-1 min-[380px]:max-h-[26vh] sm:max-h-[34vh]"
-            />
+            {tracksLoading ? (
+              <TrackListSkeleton count={listCount} className={LIST_CLASS} />
+            ) : (
+              <TrackList
+                tracks={tracks}
+                activeTrackId={activeTrack?.trackId ?? null}
+                isPlaying={isPlaying}
+                onSelect={playTrack}
+                className={LIST_CLASS}
+              />
+            )}
           </div>
         )}
       </div>
