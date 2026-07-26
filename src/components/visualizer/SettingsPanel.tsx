@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import gsap from "gsap";
+import { useRef } from "react";
 import { useAppStore, type ColorScheme } from "@/store/useAppStore";
 import type { SystemTheme } from "@/hooks/useSystemTheme";
-import { useGsapClose } from "@/hooks/useGsapClose";
+import { useDropdown } from "@/hooks/useDropdown";
+import { useRangeDrag } from "@/hooks/useRangeDrag";
 import { getParticleColors, getPalette } from "./palettes";
 import { PILL_BUTTON } from "./controlStyles";
 
@@ -36,6 +36,10 @@ function PanelSlider({
   value: number;
   onChange: (value: number) => void;
 }) {
+  // Touch dragging — see useRangeDrag. `onChange` below is still what
+  // handles keyboard steps.
+  const dragProps = useRangeDrag({ onValue: onChange });
+
   return (
     <div className="mb-5">
       <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-muted">
@@ -55,6 +59,7 @@ function PanelSlider({
         step="any"
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
+        {...dragProps}
         aria-label={label}
         aria-valuetext={readout}
         className="range-slider"
@@ -69,73 +74,32 @@ function PanelSlider({
 }
 
 export default function SettingsPanel({
+  className = "",
   theme,
   volume,
   onVolumeChange,
 }: {
+  // Set by the caller so this can be a half-width column of the phone
+  // layout's bottom row and its natural width from md: up.
+  className?: string;
   theme: SystemTheme;
   // Passed down rather than read from the store: setting the store's
-  // `volume` alone doesn't move the audio element — VisualizerStage's
-  // handleVolumeChange writes `el.volume` directly too, for the reason
-  // documented on it there (the fade effect can't depend on `volume`).
+  // `volume` alone doesn't move the audio output — VisualizerStage's
+  // handleVolumeChange writes the audio graph's fader directly too, for the
+  // reason documented on it there (the fade effect can't depend on `volume`).
   volume: number;
   onVolumeChange: (value: number) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const { open, toggle } = useDropdown(containerRef, panelRef);
   const sensitivity = useAppStore((s) => s.sensitivity);
   const setSensitivity = useAppStore((s) => s.setSensitivity);
   const colorScheme = useAppStore((s) => s.colorScheme);
   const setColorScheme = useAppStore((s) => s.setColorScheme);
 
-  const handlePanelClosed = useCallback(() => setOpen(false), []);
-  const animateClose = useGsapClose(panelRef, handlePanelClosed);
-  const handleClose = useCallback(() => {
-    animateClose({ autoAlpha: 0, y: 8, scale: 0.96, duration: 0.18, ease: "power2.in" });
-  }, [animateClose]);
-
-  // Dropdown-style panel: clicking anywhere outside it (not just the
-  // toggle button) should close it, same expectation as VinylPanel's
-  // backdrop click.
-  useEffect(() => {
-    if (!open) return;
-    function handlePointerDown(e: PointerEvent) {
-      if (!containerRef.current?.contains(e.target as Node)) handleClose();
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        handleClose();
-      }
-    }
-    document.addEventListener("pointerdown", handlePointerDown);
-    // Capture phase: this dropdown should close on its own Escape press
-    // without also closing the fullscreen visualizer behind it in the same
-    // keystroke — stopping propagation here keeps that listener from firing.
-    document.addEventListener("keydown", handleKeyDown, true);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown, true);
-    };
-  }, [open, handleClose]);
-
-  // Entrance animation — grows out of the toggle button rather than
-  // popping in instantly.
-  useEffect(() => {
-    if (!open) return;
-    const panel = panelRef.current;
-    if (!panel) return;
-    gsap.fromTo(
-      panel,
-      { autoAlpha: 0, y: 8, scale: 0.96 },
-      { autoAlpha: 1, y: 0, scale: 1, duration: 0.22, ease: "power3.out" }
-    );
-  }, [open]);
-
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} className={`relative ${className}`}>
       {/* Absolutely positioned rather than a flex sibling of the toggle
           button below: as a normal-flow sibling, this panel's own width
           (256px open vs. 0 closed) changed the width of the row it sits in,
@@ -145,10 +109,17 @@ export default function SettingsPanel({
       {open && (
         <div
           ref={panelRef}
-          /* min() rather than a flat w-64: the panel is right-anchored to a
-             button that already sits at the viewport edge, so on a 320px
-             screen a fixed 16rem would have nowhere left to go. */
-          className="absolute bottom-full right-0 mb-3 w-[min(16rem,calc(100vw-2rem))] origin-bottom-right rounded-2xl border border-line bg-surface/90 p-5 backdrop-blur-sm"
+          /* Below md this button is the right-hand half of the bottom row,
+             so a panel anchored to its right edge and given the full inset
+             width lines up with the row exactly — same trick as
+             TrackListPanel, mirrored. Sliders want that width anyway: at
+             half a phone screen, volume had about 100px of travel.
+
+             From md: up it's a corner dropdown again, where min() rather
+             than a flat w-64 keeps it on screen — it's right-anchored to a
+             button already at the viewport edge, so on a 320px screen a
+             fixed 16rem would have nowhere left to go. */
+          className="absolute bottom-full right-0 mb-3 w-[calc(100vw-2rem)] origin-bottom-right rounded-2xl border border-line bg-surface/90 p-5 backdrop-blur-sm sm:w-[calc(100vw-5rem)] md:w-[min(16rem,calc(100vw-2rem))]"
         >
           <PanelSlider
             label="Volume"
@@ -209,8 +180,8 @@ export default function SettingsPanel({
 
       <button
         type="button"
-        onClick={() => (open ? handleClose() : setOpen(true))}
-        className={PILL_BUTTON}
+        onClick={toggle}
+        className={`${PILL_BUTTON} w-full py-3 md:w-auto md:py-2`}
         aria-expanded={open}
       >
         Settings

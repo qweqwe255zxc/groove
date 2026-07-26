@@ -44,6 +44,7 @@ export default function BackgroundMusic() {
   const setMusicMuted = useAppStore((s) => s.setMusicMuted);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const unlockedRef = useRef(false);
+  const attemptingRef = useRef(false);
 
   // Restores a saved mute choice on first load, mirroring ThemeEffect's
   // restore effect — deferred to a microtask rather than a synchronous
@@ -74,27 +75,43 @@ export default function BackgroundMusic() {
     // Autoplay policy: play() must be called while the page holds "user
     // activation". Per the HTML spec's "activation triggering input events"
     // list, only pointerdown/keydown/touchstart (and relatives) directly
-    // grant it — a bare mousemove never does. But activation is *sticky*:
-    // once any one of those real gestures has landed ANYWHERE on the page
-    // (clicking the search bar, a link, anything), the page keeps activation
-    // for the rest of the session, and play() calls made afterwards succeed
-    // even from a mousemove handler — it's not the mousemove itself granting
-    // it, just riding on activation something else already earned. So
-    // mousemove is kept as a repeated, low-priority attempt: harmless to
-    // fail early (before any real gesture happened yet) and retry on the
-    // next move, and it's what makes the unlock feel like it "just happens"
-    // as soon as the user does anything at all, instead of needing a click
-    // aimed specifically at audio.
-    const realGestureEvents = ["pointerdown", "keydown", "touchstart"] as const;
+    // grant it — scrolling, a wheel tick and a bare mousemove never do. But
+    // activation is *sticky*: once any one of those real gestures has landed
+    // ANYWHERE on the page (clicking the search bar, a link, anything), the
+    // page keeps activation for the rest of the session, and play() calls
+    // made afterwards succeed even from a mousemove or scroll handler — it's
+    // not the move granting it, just riding on activation something else
+    // already earned. Chrome will also often let the first attempt through
+    // outright on a site the visitor has played media on before (its Media
+    // Engagement Index), with no gesture at all.
+    //
+    // So everything a visitor might plausibly do first is a retry point, and
+    // none of them are `once`: an attempt that fails costs nothing and the
+    // next event tries again, which is what makes the bed come up as soon as
+    // the user does *anything* — scrolls, moves the mouse, taps — rather
+    // than needing a click aimed specifically at audio.
+    const unlockEvents = [
+      "pointerdown",
+      "keydown",
+      "touchstart",
+      "mousemove",
+      "wheel",
+      "scroll",
+      "touchmove",
+    ] as const;
     function removeUnlockListeners() {
-      for (const type of realGestureEvents) window.removeEventListener(type, tryUnlock);
-      window.removeEventListener("mousemove", tryUnlock);
+      for (const type of unlockEvents) window.removeEventListener(type, tryUnlock);
     }
     // Arrow function expression, not a function declaration — TS only
     // preserves the `el` non-null narrowing from the guard above into a
     // nested closure for the latter.
     const tryUnlock = () => {
-      if (unlockedRef.current) return;
+      // `attempting` matters now that scroll is in the list: one Lenis-driven
+      // scroll fires it dozens of times a second, and without this each of
+      // those would start its own play() and leave a pile of pending
+      // promises racing each other.
+      if (unlockedRef.current || attemptingRef.current) return;
+      attemptingRef.current = true;
       el.play()
         .then(() => {
           if (unlockedRef.current) return;
@@ -106,15 +123,16 @@ export default function BackgroundMusic() {
           setSilenced(el, silenced, FADE_IN_SECONDS);
         })
         .catch(() => {
-          // Not enough activation yet — leave the other listeners in place
-          // (mousemove included: it's not `once`, so the next move tries
-          // again rather than being permanently spent on one failed guess).
+          // Not enough activation yet — leave every listener in place and
+          // let the next event have a go.
+          attemptingRef.current = false;
         });
     };
-    for (const type of realGestureEvents) {
-      window.addEventListener(type, tryUnlock, { once: true });
+    // Passive: none of these are ever preventDefault-ed, and `scroll`/`wheel`
+    // in particular must not give Lenis's own handling anything to wait on.
+    for (const type of unlockEvents) {
+      window.addEventListener(type, tryUnlock, { passive: true });
     }
-    window.addEventListener("mousemove", tryUnlock);
 
     return () => {
       removeUnlockListeners();

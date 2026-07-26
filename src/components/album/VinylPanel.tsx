@@ -6,6 +6,7 @@ import gsap from "gsap";
 import { useAppStore } from "@/store/useAppStore";
 import { Flip } from "@/lib/flip";
 import type { Track } from "@/lib/itunes";
+import TrackList from "./TrackList";
 
 // The idle spin (`.animate-spin-vinyl` in globals.css) does one full turn
 // every 2.6s at a constant rate — kept in sync here so the custom eases
@@ -71,6 +72,10 @@ export default function VinylPanel() {
   const setTracks = useAppStore((s) => s.setTracks);
   const selectAlbum = useAppStore((s) => s.selectAlbum);
   const playTrack = useAppStore((s) => s.playTrack);
+  // Only for the tracklist's now-playing marker — this panel sits behind the
+  // visualizer overlay, so a track can already be playing while it's open.
+  const activeTrack = useAppStore((s) => s.activeTrack);
+  const isPlaying = useAppStore((s) => s.isPlaying);
   const pendingFlipState = useAppStore((s) => s.pendingFlipState);
   const setPendingFlipState = useAppStore((s) => s.setPendingFlipState);
 
@@ -395,7 +400,11 @@ export default function VinylPanel() {
   return (
     <div
       ref={panelRef}
-      className="fixed inset-0 z-30 flex flex-col items-center justify-center gap-8 px-4 sm:flex-row sm:gap-16 sm:px-16"
+      /* gap-4 below 380px: the tracklist added a block to the stacked
+         layout, and a 568px-tall screen has no 32px gap to spare — at that
+         height the whole column overflowed and the vinyl got clipped off
+         the top. */
+      className="fixed inset-0 z-30 flex flex-col items-center justify-center gap-4 px-4 min-[380px]:gap-8 sm:flex-row sm:gap-16 sm:px-16"
     >
       {/* Separate from `panel` so it can fade independently on close while
           the flying cover (a sibling, not a descendant of this div) stays
@@ -471,6 +480,34 @@ export default function VinylPanel() {
               ? "Play preview"
               : "No preview available"}
         </button>
+
+        {/* Only worth showing when there's actually a choice to make — a
+            single-track release is already fully described by the button
+            above, and this panel has no height to spare on a phone. The
+            fetch puts every track in the store either way; before this
+            list existed the other eleven tracks of an album were simply
+            unreachable, since Play always took the first playable one. */}
+        {tracks.length > 1 && (
+          <div className="min-h-0">
+            {/* Hidden below 380px purely for the ~28px it costs — the list
+                underneath is self-evidently a tracklist, and at that height
+                the count is the least useful thing competing for room. */}
+            <p className="mb-2 hidden text-xs uppercase tracking-[0.2em] text-muted min-[380px]:block">
+              {tracks.length} tracks
+            </p>
+            <TrackList
+              tracks={tracks}
+              activeTrackId={activeTrack?.trackId ?? null}
+              isPlaying={isPlaying}
+              onSelect={playTrack}
+              /* Capped in vh, not rows: this panel is vertically centred
+                 against the viewport, and a fixed row count that fits a
+                 desktop window pushes the title and Play button off a
+                 320×568 phone screen. */
+              className="max-h-[22vh] pr-1 min-[380px]:max-h-[26vh] sm:max-h-[34vh]"
+            />
+          </div>
+        )}
       </div>
     </div>
   );

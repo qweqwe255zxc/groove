@@ -11,6 +11,19 @@ export type AudioApi = {
   getBands: () => FrequencyBands;
   getSpectrum: (bins: number) => Float32Array;
   resume: () => void;
+  /**
+   * Sets playback level (0..1) on the graph's output GainNode.
+   *
+   * Volume goes through gain rather than `HTMLMediaElement.volume` because
+   * iOS Safari ignores JS writes to the latter entirely — playback there
+   * always follows the hardware volume buttons — which made the visualizer's
+   * volume slider and every play/pause fade built on `el.volume` a silent
+   * no-op on a phone (the same platform quirk BackgroundMusic documents and
+   * works around by pausing outright). Gain *is* respected everywhere, and
+   * since `createMediaElementSource` already reroutes the element's output
+   * through Web Audio, it's the element's real output level.
+   */
+  setVolume: (value: number) => void;
 };
 
 /**
@@ -30,6 +43,11 @@ export function useAudioAnalyser(
   const dataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const spectrumRef = useRef<Float32Array | null>(null);
   const sensitivityRef = useRef(sensitivity);
+  const gainRef = useRef<GainNode | null>(null);
+  // Remembered separately from the node so a level set before the graph
+  // exists (or between re-wires) isn't dropped — the setup effect applies it
+  // to the node it creates.
+  const levelRef = useRef(1);
 
   useEffect(() => {
     sensitivityRef.current = sensitivity;
@@ -51,9 +69,17 @@ export function useAudioAnalyser(
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.82;
+    const gain = ctx.createGain();
 
+    // Gain sits *after* the analyser, not before it: the scene should keep
+    // reacting to the track's actual frequency content at the volume it was
+    // mixed at, so turning the slider down doesn't flatten the visuals along
+    // with the sound.
     source.connect(analyser);
-    analyser.connect(ctx.destination);
+    analyser.connect(gain);
+    gain.connect(ctx.destination);
+    gain.gain.value = levelRef.current;
+    gainRef.current = gain;
 
     analyserRef.current = analyser;
     ctxRef.current = ctx;
@@ -61,11 +87,19 @@ export function useAudioAnalyser(
     (audio as HTMLAudioElement & { __wired?: boolean }).__wired = true;
 
     return () => {
+      gainRef.current = null;
+      gain.disconnect();
       analyser.disconnect();
       source.disconnect();
       ctx.close();
     };
   }, [audioRef]);
+
+  const setVolume = useCallback((value: number) => {
+    levelRef.current = value;
+    const gain = gainRef.current;
+    if (gain) gain.gain.value = value;
+  }, []);
 
   const resume = useCallback(() => {
     const ctx = ctxRef.current;
@@ -159,7 +193,7 @@ export function useAudioAnalyser(
   // `audio` object, which for the play/pause effect in VisualizerStage means
   // spuriously re-firing `el.play()` on every unrelated re-render.
   return useMemo(
-    () => ({ getBands, getSpectrum, resume }),
-    [getBands, getSpectrum, resume]
+    () => ({ getBands, getSpectrum, resume, setVolume }),
+    [getBands, getSpectrum, resume, setVolume]
   );
 }

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Flip } from "gsap/Flip";
 import type { Album, Track } from "@/lib/itunes";
+import { findAdjacentPlayable } from "@/lib/tracks";
 
 export type VisualizerMode = "orb" | "terrain";
 export type ColorScheme = "clay" | "mono" | "sage" | "neon";
@@ -29,8 +30,8 @@ type AppState = {
   themePreference: ThemePreference;
   musicMuted: boolean;
   // The active track's own volume (0-1), set via VisualizerStage's volume
-  // slider — separate from the play/pause fade tweens, which animate el.volume
-  // toward this value rather than a hardcoded 1.
+  // slider — separate from the play/pause fade tweens, which animate the
+  // audio graph's gain toward this value rather than a hardcoded 1.
   volume: number;
 
   isMenuOpen: boolean;
@@ -50,6 +51,11 @@ type AppState = {
   setTracks: (tracks: Track[]) => void;
   setPendingFlipState: (state: Flip.FlipState | null) => void;
   playTrack: (track: Track) => void;
+  // Steps to the next (1) or previous (-1) playable track of the loaded
+  // album, for the visualizer's transport buttons and its auto-advance at
+  // the end of a track. Leaves `isVisualizerOpen` alone: unlike playTrack
+  // this only ever runs from inside the overlay.
+  playAdjacentTrack: (direction: 1 | -1) => void;
   // Same as playTrack but leaves isPlaying false — used by the /v deep-link
   // route, which opens straight into the visualizer on page load. Autoplay
   // requires a real user gesture (see the crossOrigin/AudioContext gotcha
@@ -122,6 +128,16 @@ export const useAppStore = create<AppState>((set) => ({
   setPendingFlipState: (pendingFlipState) => set({ pendingFlipState }),
   playTrack: (track) =>
     set({ activeTrack: track, isPlaying: true, isVisualizerOpen: true, localTrackError: null }),
+  playAdjacentTrack: (direction) =>
+    set((state) => {
+      const next = findAdjacentPlayable(state.tracks, state.activeTrack, direction);
+      // No-op at either end of the album rather than wrapping — see
+      // findAdjacentPlayable. Returning an empty patch leaves every
+      // subscriber's slice identical, so nothing re-renders.
+      return next
+        ? { activeTrack: next, isPlaying: true, localTrackError: null }
+        : {};
+    }),
   openTrack: (track) =>
     set({ activeTrack: track, isPlaying: false, isVisualizerOpen: true, localTrackError: null }),
   playLocalTrack: (file) => {

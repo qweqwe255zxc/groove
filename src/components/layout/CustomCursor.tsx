@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 
 const BASE_CLASSES =
@@ -20,22 +20,42 @@ function isInteractive(target: EventTarget | null) {
   );
 }
 
+const FINE_POINTER_QUERY = "(hover: hover) and (pointer: fine)";
+
 /**
  * A small dot that tracks the pointer and blooms into a hollow ring over
- * anything clickable. Only enabled for mice/trackpads — `(pointer: fine)`
- * keeps it off on touch devices, which have no cursor to replace.
+ * anything clickable. Mice and trackpads only — a touch device has no cursor
+ * to replace, and a dot that can only ever sit wherever the last tap landed
+ * is worse than none.
+ *
+ * Nothing renders at all when the pointer is coarse, rather than rendering a
+ * transparent element the effect below then declines to move: it's the one
+ * fixed, blend-mode, z-[200] element in the app, and leaving it in a phone's
+ * DOM means a compositing layer over the whole viewport for something that
+ * can never be seen.
  */
 export default function CustomCursor() {
   const dotRef = useRef<HTMLDivElement>(null);
+  // Starts false so the hydration render matches the server's (which has no
+  // matchMedia to consult), then syncs on mount. Deferred to a microtask
+  // rather than set synchronously at the top of the effect — same lint
+  // constraint as everywhere else in this codebase. The `change` listener
+  // covers input actually changing under a live page: a tablet gaining or
+  // losing a trackpad, or a hybrid laptop switching hands.
+  const [enabled, setEnabled] = useState(false);
 
   useEffect(() => {
+    const mql = window.matchMedia(FINE_POINTER_QUERY);
+    const sync = () => setEnabled(mql.matches);
+    Promise.resolve().then(sync);
+    mql.addEventListener("change", sync);
+    return () => mql.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) return;
     const el = dotRef.current;
     if (!el) return;
-
-    const isFinePointer = window.matchMedia(
-      "(hover: hover) and (pointer: fine)"
-    ).matches;
-    if (!isFinePointer) return;
 
     document.documentElement.classList.add("custom-cursor-active");
     el.className = `${BASE_CLASSES} ${DOT_CLASSES}`;
@@ -67,7 +87,8 @@ export default function CustomCursor() {
       document.removeEventListener("mouseover", handleOver);
       document.removeEventListener("mouseout", handleOut);
     };
-  }, []);
+  }, [enabled]);
 
+  if (!enabled) return null;
   return <div ref={dotRef} className={`${BASE_CLASSES} ${DOT_CLASSES}`} />;
 }

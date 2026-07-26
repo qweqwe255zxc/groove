@@ -34,7 +34,17 @@ function LiveClock() {
   // Rendered only after mount so the server-rendered markup never has to
   // guess the visitor's clock (and can't mismatch it on hydration).
   if (!time) return null;
-  return <span className="shrink-0 whitespace-nowrap tabular-nums">{time}</span>;
+  // `basis-full` below sm: the two toggles next to it change width with
+  // their own state ("Background: On" vs the wider "Off"), so on a phone the
+  // clock sat on the toggles' line for one label and jumped to the next for
+  // the other — a second-by-second component that reflows the footer as soon
+  // as anything else in it is clicked. Claiming a full row unconditionally
+  // keeps it put; from sm up there's room for all three inline.
+  return (
+    <span className="basis-full shrink-0 whitespace-nowrap tabular-nums sm:basis-auto">
+      {time}
+    </span>
+  );
 }
 
 export default function OverlayMenu() {

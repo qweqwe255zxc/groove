@@ -165,6 +165,27 @@ html.custom-cursor-active * {
   background: transparent;
   outline: none;
   cursor: pointer;
+  /* The drag is handled in JS (useRangeDrag) with pointer capture, so the
+     browser must not also claim the gesture as a scroll: a finger sliding
+     along a 4px-tall track is never perfectly horizontal, and with the
+     default `pan-y` the scroller steals it a few pixels in and the thumb
+     stops dead under the finger. */
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Fingers, not mice: the pointer-sized thumb is a ~16px target that a
+   fingertip covers entirely (so you can't see what you're setting), and the
+   press itself lands wherever the finger's centroid does, which is rarely
+   where its owner thinks. Scaling both the thumb and the row's hit height up
+   on coarse pointers keeps the same proportions with a target that survives
+   being touched. */
+@media (pointer: coarse) {
+  .range-slider {
+    --range-thumb: 24px;
+    --range-track: 6px;
+    --range-hit: 40px;
+  }
 }
 
 .range-slider::-webkit-slider-runnable-track {
@@ -197,8 +218,13 @@ html.custom-cursor-active * {
   transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 180ms ease;
 }
 
-.range-slider:hover::-webkit-slider-thumb {
-  transform: scale(1.15);
+/* Hover-capable pointers only — a touch leaves :hover stuck on whatever it
+   last touched, so on a phone this would have been a thumb that grows on the
+   first drag and never shrinks back. */
+@media (hover: hover) {
+  .range-slider:hover::-webkit-slider-thumb {
+    transform: scale(1.15);
+  }
 }
 
 .range-slider:active::-webkit-slider-thumb {
@@ -233,8 +259,10 @@ html.custom-cursor-active * {
   transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 180ms ease;
 }
 
-.range-slider:hover::-moz-range-thumb {
-  transform: scale(1.15);
+@media (hover: hover) {
+  .range-slider:hover::-moz-range-thumb {
+    transform: scale(1.15);
+  }
 }
 
 .range-slider:active::-moz-range-thumb {

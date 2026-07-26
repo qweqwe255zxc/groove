@@ -6,15 +6,23 @@ import { EffectComposer, Bloom, Vignette } from "@react-three/postprocessing";
 import * as THREE from "three";
 import gsap from "gsap";
 import { useAppStore } from "@/store/useAppStore";
+import { findAdjacentPlayable } from "@/lib/tracks";
 import { useAudioAnalyser } from "@/hooks/useAudioAnalyser";
+import { useRangeDrag } from "@/hooks/useRangeDrag";
 import { useGsapClose } from "@/hooks/useGsapClose";
 import { useResolvedTheme } from "@/hooks/useResolvedTheme";
 import { getParticleColors, getPalette } from "./palettes";
-import { PILL_BASE, PILL_BUTTON, PILL_ROW_ITEM } from "./controlStyles";
+import {
+  PILL_BASE,
+  PILL_BUTTON,
+  PILL_ROW_ITEM,
+  PILL_SHAPE,
+} from "./controlStyles";
 import CanvasErrorBoundary from "./CanvasErrorBoundary";
 import OrbScene from "./scenes/OrbScene";
 import TerrainScene from "./scenes/TerrainScene";
 import SettingsPanel from "./SettingsPanel";
+import TrackListPanel from "./TrackListPanel";
 import TrackMeta from "./TrackMeta";
 import ThemeToggle from "@/components/layout/ThemeToggle";
 
@@ -41,11 +49,28 @@ const NARROW_SCENE_DROP = 0.12;
 
 // Only ever used in dark theme — see the comment on `theme`/Bloom below for
 // why light theme skips the Bloom pass entirely instead of needing its own
-// tuning here. Threshold lowered and intensity/smoothing raised from the
-// original (0.2/0.9/1.1) — both scenes' points were reading as barely
-// glowing beyond their own edges even with additive blending, so this pass
-// needed to grab more of them and spread what it grabs further.
-const DARK_BLOOM_TUNING = { luminanceThreshold: 0.1, luminanceSmoothing: 0.95, intensity: 1.9 };
+// tuning here.
+//
+// Three independent axes, which is the useful thing to know when tuning
+// this by eye — "too bright" and "too wide" are not the same knob:
+//   luminanceThreshold — *which* pixels glow (raise it and only the hottest
+//     points qualify; lower it and the whole cloud does)
+//   intensity          — how bright the glow they produce is
+//   radius             — how far out from them it spreads. Only has any
+//     effect with `mipmapBlur` on, which is why it's on.
+//
+// `radius` is kept at postprocessing's own default on purpose: it's what
+// throws the wide, soft pool of light around the orb's silhouette, and
+// without it the glow clamps to the points themselves and the scene loses
+// the sense of the cloud lighting the space it's in. Dial brightness with
+// the first two instead — cutting `radius` to fix glare takes the halo out
+// with it.
+const DARK_BLOOM_TUNING = {
+  luminanceThreshold: 0.1,
+  luminanceSmoothing: 0.95,
+  intensity: 1,
+  radius: 0.85,
+};
 
 // A track genuinely starting (fresh load from VinylPanel's Play button) or
 // genuinely ending (onEnded, closeVisualizer) gets this — long enough to
@@ -82,6 +107,12 @@ const MAX_EXTRAPOLATION = 0.5;
 const SEEK_KEY_STEP = 5;
 const VOLUME_KEY_STEP = 0.05;
 const ARROW_KEY_TWEEN_DURATION = 0.15;
+
+// How far into a track the Previous button switches from "go back a track"
+// to "restart this one" — see handlePrev. Three seconds is the usual choice,
+// and it's comfortably longer than the pause fade, so a press right after
+// one can't be read as the wrong intent.
+const PREV_RESTART_THRESHOLD = 3;
 
 // mm:ss for the time readout next to Play — previews never run long enough
 // to need an hours place.
@@ -159,9 +190,18 @@ export default function VisualizerStage() {
   const stageRef = useRef<HTMLDivElement>(null);
   const seekRef = useRef<HTMLInputElement>(null);
   const timeDisplayRef = useRef<HTMLDivElement>(null);
+  // The same reading, split in two, for the phone layout: elapsed under the
+  // left end of the seek bar and total under the right, the way every player
+  // labels a scrubber. Only one of the two forms is ever in the DOM (the
+  // pill is `hidden` below md and these are `md:hidden`), but the updater
+  // writes whichever it finds rather than branching on a breakpoint it has
+  // no way to observe.
+  const elapsedRef = useRef<HTMLSpanElement>(null);
+  const totalRef = useRef<HTMLSpanElement>(null);
 
   const selectedAlbum = useAppStore((s) => s.selectedAlbum);
   const activeTrack = useAppStore((s) => s.activeTrack);
+  const tracks = useAppStore((s) => s.tracks);
   const isPlaying = useAppStore((s) => s.isPlaying);
   const isVisualizerOpen = useAppStore((s) => s.isVisualizerOpen);
   const visualizerMode = useAppStore((s) => s.visualizerMode);
@@ -171,10 +211,16 @@ export default function VisualizerStage() {
   const setVolume = useAppStore((s) => s.setVolume);
   const setVisualizerMode = useAppStore((s) => s.setVisualizerMode);
   const togglePlaying = useAppStore((s) => s.togglePlaying);
+  const playAdjacentTrack = useAppStore((s) => s.playAdjacentTrack);
   const closeVisualizer = useAppStore((s) => s.closeVisualizer);
   const setLocalTrackError = useAppStore((s) => s.setLocalTrackError);
 
   const audio = useAudioAnalyser(audioRef, sensitivity);
+  // Both are null for a local upload (no album, no list) and at the ends of
+  // an album — which is exactly when the matching transport button should be
+  // dead rather than silently doing nothing.
+  const prevTrack = findAdjacentPlayable(tracks, activeTrack, -1);
+  const nextTrack = findAdjacentPlayable(tracks, activeTrack, 1);
   // "Resolved" rather than "system" — reflects ThemeToggle's manual override
   // when one is active, falling back to the OS preference otherwise (see
   // useResolvedTheme).
@@ -221,6 +267,10 @@ export default function VisualizerStage() {
     }
     const label = timeDisplayRef.current;
     if (label) label.textContent = `${formatTime(time)} / ${formatTime(dur)}`;
+    const elapsed = elapsedRef.current;
+    if (elapsed) elapsed.textContent = formatTime(time);
+    const total = totalRef.current;
+    if (total) total.textContent = formatTime(dur);
   }, []);
 
   // `el.currentTime` itself only actually advances in coarse steps
@@ -409,13 +459,47 @@ export default function VisualizerStage() {
   // only fires once per track and gets a clean slate on every fresh start.
   const endFadeStartedRef = useRef(false);
 
+  // Every level change below (the play/pause fades, the end fade, the slider)
+  // goes through `audio.setVolume` — the audio graph's output gain — rather
+  // than `el.volume`, which iOS Safari ignores outright; see the docblock on
+  // setVolume in useAudioAnalyser. gsap can't tween a plain function call, so
+  // this ref-held object is what the tweens actually animate, with each frame
+  // pushed to the gain in onUpdate (the same proxy-object pattern seekBy and
+  // volumeBy already use for arrow keys).
+  const faderRef = useRef({ volume: 1 });
+  const setOutputVolume = audio.setVolume;
+  const fadeTo = useCallback(
+    (value: number, duration: number, onComplete?: () => void) => {
+      const fader = faderRef.current;
+      gsap.killTweensOf(fader);
+      gsap.to(fader, {
+        volume: value,
+        duration,
+        ease: "sine.inOut",
+        onUpdate: () => setOutputVolume(fader.volume),
+        onComplete,
+      });
+    },
+    [setOutputVolume]
+  );
+  // Jumps the level immediately, cancelling any fade in flight — dragging the
+  // slider, or restoring a level a fade left somewhere else.
+  const setVolumeNow = useCallback(
+    (value: number) => {
+      gsap.killTweensOf(faderRef.current);
+      faderRef.current.volume = value;
+      setOutputVolume(value);
+    },
+    [setOutputVolume]
+  );
+
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
     // Kill any fade already in flight — rapid play/pause toggling (or a
     // track switch mid-fade) would otherwise leave two tweens fighting over
-    // `el.volume`.
-    gsap.killTweensOf(el);
+    // the fader.
+    gsap.killTweensOf(faderRef.current);
     const duration = fastFadeRef.current ? MICRO_FADE_DURATION : FADE_DURATION;
     fastFadeRef.current = false;
     // el.play() is async (it can be waiting on buffering) — if isPlaying
@@ -438,7 +522,7 @@ export default function VisualizerStage() {
       // wherever the fade-out tail left the element. A no-op for a genuine
       // fresh start (both are already 0 from the src-change effect above).
       el.currentTime = displayTimeRef.current;
-      el.volume = 0;
+      setVolumeNow(0);
       el.play()
         .then(() => {
           if (cancelled) return;
@@ -448,18 +532,13 @@ export default function VisualizerStage() {
           // volume was set the moment this effect last ran instead of
           // whatever the slider is at right now.
           const target = useAppStore.getState().volume;
-          gsap.to(el, { volume: target, duration, ease: "sine.inOut" });
+          fadeTo(target, duration);
         })
         .catch(() => {
           if (!cancelled) togglePlaying(false);
         });
     } else {
-      gsap.to(el, {
-        volume: 0,
-        duration,
-        ease: "sine.inOut",
-        onComplete: () => el.pause(),
-      });
+      fadeTo(0, duration, () => el.pause());
     }
     // `activeTrack?.previewUrl` is also a dependency, not just `isPlaying` —
     // without it, switching to a new track while already playing (isPlaying
@@ -469,7 +548,7 @@ export default function VisualizerStage() {
     return () => {
       cancelled = true;
     };
-  }, [isPlaying, activeTrack?.previewUrl, audio, togglePlaying]);
+  }, [isPlaying, activeTrack?.previewUrl, audio, fadeTo, setVolumeNow, togglePlaying]);
 
   // Starts the artistic end fade FADE_DURATION seconds early, timed against
   // actual playback position (not a setTimeout) so it lands at 0 right as
@@ -482,13 +561,12 @@ export default function VisualizerStage() {
       const remaining = el.duration - el.currentTime;
       if (remaining <= FADE_DURATION) {
         endFadeStartedRef.current = true;
-        gsap.killTweensOf(el);
-        gsap.to(el, { volume: 0, duration: Math.max(remaining, 0), ease: "sine.inOut" });
+        fadeTo(0, Math.max(remaining, 0));
       }
     }
     el.addEventListener("timeupdate", handleTimeUpdate);
     return () => el.removeEventListener("timeupdate", handleTimeUpdate);
-  }, []);
+  }, [fadeTo]);
 
   // Wraps togglePlaying() for the explicit play/pause entry points (button,
   // Spacebar) so the fade above can tell "user toggled mid-track playback"
@@ -536,14 +614,14 @@ export default function VisualizerStage() {
         // else would restore the volume until the next track).
         if (endFadeStartedRef.current && dur - value > FADE_DURATION) {
           endFadeStartedRef.current = false;
-          gsap.killTweensOf(el);
-          if (isPlaying) el.volume = useAppStore.getState().volume;
+          gsap.killTweensOf(faderRef.current);
+          if (isPlaying) setVolumeNow(useAppStore.getState().volume);
         }
       }
       anchorPlayback(value);
       updateSeekDisplay(value, dur);
     },
-    [isPlaying, anchorPlayback, updateSeekDisplay]
+    [isPlaying, setVolumeNow, anchorPlayback, updateSeekDisplay]
   );
 
   const handleSeek = useCallback(
@@ -605,9 +683,7 @@ export default function VisualizerStage() {
   // The thumb is the user's to move while they hold it — the rAF loop above
   // checks this flag and leaves the input alone until the pointer is
   // released, at which point the real seek is committed to wherever they let
-  // go (see handleSeek/commitSeek above). onLostPointerCapture covers the
-  // release landing outside the input, which a range element captures the
-  // pointer for.
+  // go (see commitSeek above).
   const handleScrubStart = useCallback(() => {
     isScrubbingRef.current = true;
   }, []);
@@ -619,8 +695,61 @@ export default function VisualizerStage() {
     commitSeek(Number(seekRef.current?.value ?? 0), dur);
   }, [duration, commitSeek]);
 
-  // Sets el.volume directly rather than through the store's `volume` value
-  // as a dependency — wiring the fade-in effect above to `volume` would
+  // Painting only, no seek: the whole drag is one continuous gesture, and
+  // handleScrubEnd commits its final position on release (the same split
+  // handleSeek already made for a native drag, and for the same reason —
+  // writing `el.currentTime` on every pointer tick sounds like scratching a
+  // record). Drag handling itself is taken over from the browser by
+  // useRangeDrag, which is what makes the bar reachable by finger at all.
+  const handleScrubMove = useCallback(
+    (value: number) => {
+      updateSeekDisplay(value, audioRef.current?.duration || duration);
+    },
+    [duration, updateSeekDisplay]
+  );
+
+  const seekDragProps = useRangeDrag({
+    onStart: handleScrubStart,
+    onValue: handleScrubMove,
+    onEnd: handleScrubEnd,
+  });
+
+  // Next: straight to the following playable track. Marked as a fast fade
+  // for the same reason an explicit Pause is — the user asked for this one
+  // *now*, while the slow artistic fade-in belongs to a track that started
+  // on its own (VinylPanel's Play, or auto-advance at the end of the
+  // previous one).
+  const handleNext = useCallback(() => {
+    if (!nextTrack) return;
+    fastFadeRef.current = true;
+    playAdjacentTrack(1);
+  }, [nextTrack, playAdjacentTrack]);
+
+  // Previous, with the convention every media player uses: once you're a few
+  // seconds in, the first press restarts *this* track and only a second one
+  // leaves it. Without that rule the button can't do the thing it's most
+  // often reached for — "play that again from the top" — and a press a
+  // moment too late silently throws you back a track instead.
+  //
+  // Measured against `displayTimeRef` rather than `el.currentTime`: it's the
+  // position actually on screen, which is what the user is judging "am I far
+  // enough in" by, and the element's own clock deliberately runs ahead of it
+  // through a pause fade (see the rAF loop above).
+  const handlePrev = useCallback(() => {
+    const restart =
+      displayTimeRef.current > PREV_RESTART_THRESHOLD || !prevTrack;
+    if (restart) {
+      // With nothing before this track, a restart is the only thing
+      // "previous" can mean — better than a press that does nothing at all.
+      commitSeek(0, audioRef.current?.duration || duration);
+      return;
+    }
+    fastFadeRef.current = true;
+    playAdjacentTrack(-1);
+  }, [prevTrack, playAdjacentTrack, commitSeek, duration]);
+
+  // Writes the fader directly rather than going through the store's `volume`
+  // value as a dependency — wiring the fade-in effect above to `volume` would
   // re-run the whole play/pause effect (and restart the fade from 0) on
   // every drag tick. Skipped entirely once the pre-emptive end fade has
   // started (endFadeStartedRef) so dragging near a track's end doesn't kill
@@ -628,17 +757,13 @@ export default function VisualizerStage() {
   const handleVolumeChange = useCallback(
     (value: number) => {
       setVolume(value);
-      const el = audioRef.current;
-      if (el && isPlaying && !endFadeStartedRef.current) {
-        gsap.killTweensOf(el);
-        el.volume = value;
-      }
+      if (isPlaying && !endFadeStartedRef.current) setVolumeNow(value);
     },
-    [isPlaying, setVolume]
+    [isPlaying, setVolumeNow, setVolume]
   );
 
   // Arrow-key volume (Up/Down) — tweens through handleVolumeChange every
-  // frame (same live `el.volume` write dragging the slider gets) instead of
+  // frame (same live fader write dragging the slider gets) instead of
   // jumping straight to the target, so a tap of the arrow key reads as a
   // glide rather than a step.
   const volumeTweenRef = useRef({ v: 0 });
@@ -756,7 +881,21 @@ export default function VisualizerStage() {
           const dur = el && Number.isFinite(el.duration) ? el.duration : 0;
           anchorPlayback(dur);
           updateSeekDisplay(dur, dur);
-          togglePlaying(false);
+          // Auto-advance: an album plays through. `nextTrack` is read fresh
+          // from the store rather than closed over, since this handler is
+          // attached to an element that never unmounts (gotcha 2) and would
+          // otherwise be advancing from whatever the track was when the
+          // overlay last rendered. Not marked as a fast fade — the next
+          // track starting on its own is exactly the case the slower
+          // artistic fade-in is for. The src-change effect re-anchors the
+          // clocks to 0, so the `dur` stamped above is only ever the last
+          // frame of the finished track.
+          const state = useAppStore.getState();
+          if (findAdjacentPlayable(state.tracks, state.activeTrack, 1)) {
+            state.playAdjacentTrack(1);
+          } else {
+            togglePlaying(false);
+          }
         }}
         onError={() => {
           // playLocalTrack() already rejects an obviously-wrong file
@@ -803,6 +942,7 @@ export default function VisualizerStage() {
                       luminanceThreshold={DARK_BLOOM_TUNING.luminanceThreshold}
                       luminanceSmoothing={DARK_BLOOM_TUNING.luminanceSmoothing}
                       intensity={DARK_BLOOM_TUNING.intensity}
+                      radius={DARK_BLOOM_TUNING.radius}
                       mipmapBlur
                     />
                   ),
@@ -819,29 +959,22 @@ export default function VisualizerStage() {
 
           <TrackMeta />
 
-          {/* Three widths, not two. Below 420px four tracked-out pills
-              can't share one line without the longest label ("Terrain",
-              "Copied") spilling past the edge, so they wrap 2×2 — still
-              spanning the full width, just over two rows. From 420px to sm
-              they fit one row and `flex-1` stretches them to actually fill
-              it (stopping just short read as a mis-measured row rather than
-              a deliberate inset). From sm: up they go back to a compact
-              group in the corner, where stretching would instead strand
-              them at opposite ends of a wide screen.
+          {/* One line at every width. Below sm the four pills share it as
+              equal columns spanning the full inset (stopping short read as a
+              mis-measured row rather than a deliberate inset); from sm: up
+              they shrink back to a compact group in the corner. Below 420px
+              the type and padding step down a size to keep all four on the
+              line — see PILL_ROW_ITEM, which is where that lives.
 
-              The `max-[420px]:order-*` below only bite while it's wrapped:
-              Share/Close take the top row there, since the two that leave
-              the visualizer belong above the two that just restyle it.
-              Source order stays the single-row reading order (Orb, Light,
-              Share, Close), which is what tab order follows and what every
-              width from 420px up actually renders. */}
-          <div className="absolute inset-x-4 top-4 flex flex-wrap items-center gap-2 min-[420px]:flex-nowrap sm:inset-x-auto sm:right-10 sm:top-10 sm:gap-3">
+              This used to wrap 2×2 below 420px instead, which cost the scene
+              a second band of chrome across the top of a phone screen. */}
+          <div className="absolute inset-x-4 top-4 flex items-center gap-1.5 min-[420px]:gap-2 sm:inset-x-auto sm:right-10 sm:top-10 sm:gap-3">
             <button
               type="button"
               onClick={() =>
                 setVisualizerMode(visualizerMode === "orb" ? "terrain" : "orb")
               }
-              className={`${PILL_ROW_ITEM} ${PILL_BUTTON} max-[420px]:order-3`}
+              className={`${PILL_BUTTON} ${PILL_ROW_ITEM}`}
             >
               {visualizerMode === "orb" ? "Orb" : "Terrain"}
             </button>
@@ -850,15 +983,12 @@ export default function VisualizerStage() {
                 the comment on that early-return in SiteHeader.tsx — so
                 there'd be no way to flip the theme without first closing the
                 visualizer if it weren't also reachable from here. */}
-            <ThemeToggle
-              variant="control"
-              className={`${PILL_ROW_ITEM} max-[420px]:order-4`}
-            />
+            <ThemeToggle variant="control" className={PILL_ROW_ITEM} />
             <button
               type="button"
               onClick={handleShare}
               disabled={!selectedAlbum || !activeTrack}
-              className={`${PILL_ROW_ITEM} ${PILL_BUTTON} disabled:cursor-not-allowed disabled:opacity-40 max-[420px]:order-1`}
+              className={`${PILL_BUTTON} ${PILL_ROW_ITEM} disabled:cursor-not-allowed disabled:opacity-40`}
             >
               {shareCopied ? "Copied" : "Share"}
             </button>
@@ -866,87 +996,139 @@ export default function VisualizerStage() {
               type="button"
               onClick={handleClose}
               aria-label="Close visualizer"
-              className={`${PILL_ROW_ITEM} ${PILL_BUTTON} max-[420px]:order-2`}
+              className={`${PILL_BUTTON} ${PILL_ROW_ITEM}`}
             >
               Close
             </button>
           </div>
 
-          {/* Full-width seek bar — sits above the button row so opening
-              SettingsPanel's dropdown (which grows upward from the button
-              row below) doesn't fight it for space. */}
-          <div className="absolute bottom-16 left-4 right-4 sm:bottom-24 sm:left-10 sm:right-10">
-            {/* step="any" rather than a number: a native thumb snaps to its
-                step, so a 0.1s step on a 30s preview quantised the thumb to
-                ~4px hops while the CSS fill (a raw fraction) crawled on
-                smoothly between them — the two visibly disagreed several
-                times a second. "any" lets the thumb sit exactly where the
-                fill does. */}
-            <input
-              ref={seekRef}
-              type="range"
-              min={0}
-              max={duration || 0}
-              step="any"
-              defaultValue={0}
-              onChange={handleSeek}
-              onPointerDown={handleScrubStart}
-              onPointerUp={handleScrubEnd}
-              onPointerCancel={handleScrubEnd}
-              onLostPointerCapture={handleScrubEnd}
-              disabled={!duration}
-              aria-label="Seek"
-              className="range-slider disabled:opacity-40"
-            />
-          </div>
+          {/* Everything that drives playback, as one block pinned to the
+              bottom edge: seek, then the controls under it. They used to be
+              two separately-positioned bars whose offsets had to be kept in
+              sync by hand (`bottom-32` vs `bottom-24`) so a touch screen's
+              40px-tall slider hit area wouldn't reach down into the buttons;
+              stacked in one column the gap is just a gap.
 
-          {/* Play, elapsed/total, Settings — one row at every width, but
-              spaced two different ways. From sm: the ends are `flex-1
-              basis-0`, so they measure equal regardless of their own content
-              ("Pause" is wider than "Play", "Settings" wider than both) and
-              the readout sits on the real centre line rather than drifting
-              as the labels change. Below sm there isn't enough width left
-              over for that to look like anything but three unevenly-spaced
-              pills, so it falls back to `justify-between`, which splits the
-              slack evenly between neighbours instead. Volume moved inside
-              Settings: as a fourth item out here it was the one thing with
-              no room left below sm. */}
-          <div className="absolute inset-x-4 bottom-4 flex items-end justify-between gap-2 sm:inset-x-10 sm:bottom-10 sm:gap-3">
-            <div className="flex sm:flex-1 sm:basis-0 sm:justify-start">
-              <button
-                type="button"
-                onClick={handleTogglePlaying}
-                className={`${PILL_BUTTON} sm:px-5`}
-              >
-                {isPlaying ? "Pause" : "Play"}
-              </button>
-            </div>
-
-            {/* Text content is intentionally static here — updateSeekDisplay
-                writes the live value straight to this node's textContent.
-                Rendering the same literal on every React re-render (rather
-                than reading state) means reconciliation never has reason to
-                touch it and stomp the imperative update; it only gets
-                overwritten for real when `duration` actually changes, at
-                which point resetting to 0 is correct anyway (see the
-                src-change effect above). */}
-            {/* tracking-normal below sm, unlike every other pill: this is
-                the widest thing in the row by some margin (13 characters),
-                and tabular figures already read as evenly spaced without
-                letter-spacing helping them. */}
-            <div
-              ref={timeDisplayRef}
-              className={`${PILL_BASE} shrink-0 whitespace-nowrap tabular-nums tracking-normal sm:px-5 sm:tracking-[0.2em]`}
-            >
-              {formatTime(0)} / {formatTime(duration)}
-            </div>
-
-            <div className="flex sm:flex-1 sm:basis-0 sm:justify-end">
-              <SettingsPanel
-                theme={theme}
-                volume={volume}
-                onVolumeChange={handleVolumeChange}
+              Below md this is a phone player: full-width scrubber, its two
+              ends labelled underneath, a transport row where Play takes all
+              the width the arrows don't, and Tracks/Settings splitting a row
+              of their own 50/50. Everything spans the full inset, so nothing
+              is left dangling mid-row the way the old ragged two-line
+              arrangement was. From md: up it collapses back to the single
+              line it always was — transport left, readout centred, dropdowns
+              right. */}
+          <div className="absolute inset-x-4 bottom-4 flex flex-col gap-3 sm:inset-x-10 sm:bottom-10 sm:gap-4">
+            <div>
+              {/* step="any" rather than a number: a native thumb snaps to its
+                  step, so a 0.1s step on a 30s preview quantised the thumb to
+                  ~4px hops while the CSS fill (a raw fraction) crawled on
+                  smoothly between them — the two visibly disagreed several
+                  times a second. "any" lets the thumb sit exactly where the
+                  fill does. */}
+              <input
+                ref={seekRef}
+                type="range"
+                min={0}
+                max={duration || 0}
+                step="any"
+                defaultValue={0}
+                onChange={handleSeek}
+                {...seekDragProps}
+                disabled={!duration}
+                aria-label="Seek"
+                className="range-slider disabled:opacity-40"
               />
+              {/* Phone-only: the pill below carries both figures from md up.
+                  Plain muted text rather than a third bordered chip — a
+                  scrubber's own labels are the one thing here that isn't a
+                  control, and giving them a border made them look like one.
+                  `px-1` lines each figure up with the end of the track
+                  rather than the end of the thumb's travel. */}
+              <div className="mt-2 flex justify-between px-1 text-[11px] tabular-nums tracking-widest text-muted md:hidden">
+                <span ref={elapsedRef}>{formatTime(0)}</span>
+                <span ref={totalRef}>{formatTime(duration)}</span>
+              </div>
+            </div>
+
+            {/* Two stacked rows below md, one from md: up — where the outer
+                groups go `flex-1 basis-0` so they measure equal regardless of
+                their own content ("Pause" is wider than "Play", "Settings"
+                wider than both) and the readout sits on the real centre line
+                rather than drifting as the labels change.
+
+                md rather than sm because it's content width that decides it:
+                all five controls on one line need ~614px, and even a 640px
+                screen only offers 560. Volume lives inside Settings for the
+                same reason — out here it was the one thing with no room. */}
+            <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between md:gap-3">
+              <div className="flex items-stretch gap-2 md:flex-1 md:basis-0 md:items-center md:justify-start">
+                {/* Rendered only for a real multi-track album: a local upload
+                    has nothing to step to, and two permanently-dead buttons
+                    are worse than none. */}
+                {tracks.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={handlePrev}
+                    aria-label="Previous track"
+                    className={`${PILL_BUTTON} shrink-0 px-5 py-3 leading-none md:px-3 md:py-2`}
+                  >
+                    <span aria-hidden>◀◀</span>
+                  </button>
+                )}
+                {/* The one filled control in the overlay, at every width:
+                    the transport row is the first thing anyone goes for and
+                    three identical outlined pills give them nothing to aim
+                    at. Only its metrics change at md: — full-width and
+                    finger-tall below, natural width and the same height as
+                    the pills beside it above. Built on PILL_SHAPE, not
+                    PILL_BUTTON, so neither the shared `hover:border-fg` nor
+                    the shared border/text colours have to be fought off
+                    here; hover dips the fill instead, since a border it
+                    already has can't light up. */}
+                <button
+                  type="button"
+                  onClick={handleTogglePlaying}
+                  className={`${PILL_SHAPE} flex-1 cursor-pointer border-accent bg-accent py-3 text-center text-bg transition hover:opacity-90 md:flex-none md:px-5 md:py-2`}
+                >
+                  {isPlaying ? "Pause" : "Play"}
+                </button>
+                {tracks.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={handleNext}
+                    disabled={!nextTrack}
+                    aria-label="Next track"
+                    className={`${PILL_BUTTON} shrink-0 px-5 py-3 leading-none disabled:cursor-not-allowed disabled:opacity-40 md:px-3 md:py-2`}
+                  >
+                    <span aria-hidden>▶▶</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Text content is intentionally static here — updateSeekDisplay
+                  writes the live value straight to this node's textContent.
+                  Rendering the same literal on every React re-render (rather
+                  than reading state) means reconciliation never has reason to
+                  touch it and stomp the imperative update; it only gets
+                  overwritten for real when `duration` actually changes, at
+                  which point resetting to 0 is correct anyway (see the
+                  src-change effect above). */}
+              <div
+                ref={timeDisplayRef}
+                className={`${PILL_BASE} hidden shrink-0 whitespace-nowrap tabular-nums md:block md:px-5`}
+              >
+                {formatTime(0)} / {formatTime(duration)}
+              </div>
+
+              <div className="flex items-stretch gap-2 md:flex-1 md:basis-0 md:items-end md:justify-end md:gap-3">
+                <TrackListPanel className="flex-1 md:flex-none" />
+                <SettingsPanel
+                  className="flex-1 md:flex-none"
+                  theme={theme}
+                  volume={volume}
+                  onVolumeChange={handleVolumeChange}
+                />
+              </div>
             </div>
           </div>
         </div>
