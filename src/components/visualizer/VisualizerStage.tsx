@@ -99,6 +99,12 @@ const HAVE_FUTURE_DATA = 3;
 // Ceiling (seconds) on how far the displayed position may run ahead of the
 // last `currentTime` the element actually confirmed.
 const MAX_EXTRAPOLATION = 0.5;
+// How far the element's own clock has to advance past a freshly anchored
+// position before the loop below trusts it to be running and starts
+// extrapolating again. Small enough that a real playing element clears it on
+// its first or second update, large enough not to be tripped by the sample
+// -boundary rounding a `currentTime` write comes back with.
+const CLOCK_LIVE_EPSILON = 0.01;
 
 // Arrow-key nudges: Left/Right seeks, Up/Down adjusts volume. Both animate
 // to the new position over this duration rather than snapping instantly —
@@ -295,6 +301,19 @@ export default function VisualizerStage() {
   // as the bar being "jumpy" even when it's advancing on every frame.
   const displayTimeRef = useRef(0);
   const lastFrameRef = useRef(0);
+  // The position the clocks were last anchored to, and whether the element
+  // has since been seen actually moving past it.
+  //
+  // Between a resume (or a seek) and the element's clock genuinely starting
+  // again there's a window where it already reports `paused: false` and
+  // `readyState: 4` while `currentTime` hasn't budged — on iOS that's the
+  // audio session spinning back up, and it runs a few hundred ms. Trusting
+  // those two flags alone, the loop below extrapolated straight through it:
+  // the bar sailed up to MAX_EXTRAPOLATION ahead of the audio and then
+  // rubber-banded back the moment the first real `currentTime` landed, which
+  // is what "the slider jumps backwards after unpausing" was.
+  const anchorTimeRef = useRef(0);
+  const clockLiveRef = useRef(false);
   // True while the user is dragging the thumb. The loop below has to stand
   // down for the duration: a seek isn't instant, so `el.currentTime` keeps
   // reporting the pre-seek position for a few frames and writing that back
@@ -315,6 +334,11 @@ export default function VisualizerStage() {
     basePerfRef.current = performance.now();
     lastFrameRef.current = basePerfRef.current;
     displayTimeRef.current = time;
+    // Every caller is a position change the element hasn't caught up with
+    // yet (a new src, a resume, the end of a drag), so its clock is stale by
+    // definition until it's seen moving again.
+    anchorTimeRef.current = time;
+    clockLiveRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -367,15 +391,27 @@ export default function VisualizerStage() {
         baseTimeRef.current = el.currentTime;
         basePerfRef.current = now;
       }
+      // Measured against the anchor rather than the previous frame's
+      // baseline: a display refreshing faster than the element updates its
+      // clock would never see a single step clear the epsilon, but total
+      // progress since the anchor always does.
+      if (
+        !clockLiveRef.current &&
+        el.currentTime - anchorTimeRef.current > CLOCK_LIVE_EPSILON
+      ) {
+        clockLiveRef.current = true;
+      }
       const dur = el.duration || 0;
       // Extrapolation is only valid while the element is actually decoding
       // and emitting audio — mid-buffer (readyState drops), `currentTime`
       // stands still and extrapolating anyway would walk the thumb away
-      // from the sound. The cap covers the same thing from the other side:
-      // however long the element goes without a real update, the thumb
-      // never runs more than this far ahead of the last position it
-      // confirmed.
-      const playing = !el.paused && el.readyState >= HAVE_FUTURE_DATA;
+      // from the sound. `clockLive` covers the case the other two flags
+      // miss, where the element claims both but hasn't started moving yet
+      // (see the ref's own comment). The cap covers it from the other side:
+      // however long the element goes without a real update, the thumb never
+      // runs more than this far ahead of the last position it confirmed.
+      const playing =
+        clockLiveRef.current && !el.paused && el.readyState >= HAVE_FUTURE_DATA;
       const elapsed = playing
         ? Math.min((now - basePerfRef.current) / 1000, MAX_EXTRAPOLATION) * el.playbackRate
         : 0;
