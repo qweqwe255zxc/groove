@@ -1,5 +1,7 @@
 # Groove — audio-reactive album visualizer
 
+### [🔗 Live demo — groove-vizualizer.vercel.app](https://groove-vizualizer.vercel.app/)
+
 Search iTunes for an album, expand its cover into a spinning vinyl, hit play,
 and a fullscreen Three.js scene reacts to the track's frequencies in real
 time.
@@ -7,25 +9,6 @@ time.
 Built with Next.js 16 (App Router, TypeScript), Tailwind v4,
 [react-three-fiber](https://github.com/pmndrs/react-three-fiber) / three.js,
 GSAP, Lenis, and Zustand.
-
-## Getting started
-
-```bash
-npm install
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000). No API keys or
-environment variables are required — the iTunes Search API is public and
-keyless, and all requests to it are proxied through this app's own API
-routes (see below).
-
-## Scripts
-
-- `npm run dev` — start the dev server
-- `npm run build` — production build
-- `npm run start` — serve the production build
-- `npm run lint` — run ESLint
 
 ## How it works
 
@@ -62,7 +45,24 @@ why `Flip.from()` needs an explicit `targets`, and so on — see
 - `src/components/visualizer/` — `VisualizerStage` (canvas host + controls),
   `scenes/` (`OrbScene`, `TerrainScene`), settings and track-meta UI
 
+## Running locally
+
+```bash
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). No API keys or
+environment variables are required — the iTunes Search API is public and
+keyless, and all requests to it are proxied through this app's own API
+routes.
+
+- `npm run dev` — start the dev server
+- `npm run build` — production build
+- `npm run start` — serve the production build
+- `npm run lint` — run ESLint
+
 ## Deployment
 
-Any Next.js host works (e.g. [Vercel](https://vercel.com/new)). No secrets
-to configure — just `npm run build` and serve.
+Deployed on [Vercel](https://vercel.com/new). No secrets to configure —
+just `npm run build` and serve.
